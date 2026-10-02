@@ -3,6 +3,7 @@ export type TaskColumn = 'todo' | 'ongoing' | 'blocked' | 'done';
 /** revenue = money in; direct = cost tied to delivering a project; opex = running the business. */
 export type EntryType = 'revenue' | 'direct' | 'opex';
 export type Frequency = 'monthly' | 'yearly';
+export type Priority = 'none' | 'low' | 'medium' | 'high';
 
 export interface Profile {
   name: string;
@@ -18,6 +19,8 @@ export interface Profile {
   investIsin: string;
   investMic: string;
   investName: string;
+  /** Monthly revenue goal shown on the Overview, 0 = none. */
+  revenueGoal: number;
 }
 
 /** Money put into the S&P 500 ETF on a given day. */
@@ -49,6 +52,8 @@ export interface Project {
   position: number;
   /** Brief shown on the project page. */
   brief: ProjectBrief;
+  /** Agreed price for the project (excl. tax), 0 = not set. */
+  budget: number;
 }
 
 export interface ProjectBrief {
@@ -83,6 +88,29 @@ export interface Task {
   position: number;
   /** When the task entered the Done column (ISO), '' otherwise. Hidden from the board a week later. */
   doneAt: string;
+  priority: Priority;
+  checklist: CheckItem[];
+}
+
+/** One line of a task's checklist. */
+export interface CheckItem {
+  id: string;
+  text: string;
+  done: boolean;
+}
+
+/** Time spent on a project (and optionally one of its tasks). A running timer has startedAt set. */
+export interface TimeEntry {
+  id: string;
+  projectId: string;
+  /** Soft link: the time stays logged on the project if the task is deleted. */
+  taskId: string;
+  date: string;
+  /** Minutes already counted; a running timer adds the time since startedAt. */
+  minutes: number;
+  note: string;
+  /** ISO time the timer was started, '' when stopped. */
+  startedAt: string;
 }
 
 /** One-off transaction, typed in by hand. */
@@ -94,6 +122,10 @@ export interface Entry {
   category: string;
   amount: number;
   projectId: string;
+  /** Revenue only: false while the invoice is waiting to be paid. Costs are always paid. */
+  paid: boolean;
+  /** Revenue only: when the invoice is due ('' = no due date). */
+  due: string;
 }
 
 /** Subscription, retainer or fixed contractor fee that repeats until stopped. */
@@ -118,9 +150,12 @@ export interface AppData {
   recurring: Recurring[];
   notes: Note[];
   investments: Investment[];
+  timeEntries: TimeEntry[];
 }
 
 /** A transaction as the finance views see it: either typed in, or generated from a recurring item. */
-export interface Txn extends Entry {
+export interface Txn extends Omit<Entry, 'paid' | 'due'> {
   recurringId?: string;
+  paid?: boolean;
+  due?: string;
 }

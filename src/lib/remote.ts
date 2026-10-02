@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { AppData, Client, Entry, Investment, Note, Project, Recurring, Task } from '../types';
+import type { AppData, Client, Entry, Investment, Note, Project, Recurring, Task, TimeEntry } from '../types';
 import { normalize, type Repository } from './store';
 
 /*
@@ -20,12 +20,17 @@ const UNKNOWN = Symbol('unknown'); // the request carrying this row failed: stat
 
 type Row = Record<string, unknown>;
 type Known = Row | typeof UNKNOWN;
-type ListTable = 'clients' | 'projects' | 'recurring' | 'entries' | 'tasks' | 'notes' | 'investments';
-type Rows = { profile: Row; clients: Row[]; projects: Row[]; recurring: Row[]; entries: Row[]; tasks: Row[]; notes: Row[]; investments: Row[] };
+type ListTable = 'clients' | 'projects' | 'recurring' | 'entries' | 'tasks' | 'notes' | 'investments' | 'time_entries';
+type Rows = { profile: Row; clients: Row[]; projects: Row[]; recurring: Row[]; entries: Row[]; tasks: Row[]; notes: Row[]; investments: Row[]; time_entries: Row[] };
+const emptyTables = (): Record<ListTable, Map<string, Known>> => ({
+  clients: new Map(), projects: new Map(), recurring: new Map(), entries: new Map(), tasks: new Map(), notes: new Map(), investments: new Map(), time_entries: new Map(),
+});
 type Stale = { projects: string[]; clients: string[] };
 type Base = { profile: Known | null; tables: Record<ListTable, Map<string, Known>> };
 
 const orNull = (s: string) => (s ? s : null);
+/** Error message used when the database misses tables or columns this version needs. */
+export const SCHEMA_OUTDATED = 'schema-outdated';
 const str = (v: unknown) => (v == null ? '' : String(v));
 
 /** A write the database refused for good (constraint, bad value): retrying the same payload is pointless. */
@@ -54,7 +59,7 @@ async function fetchAll(db: SupabaseClient, table: string, order: string): Promi
 
 /* ---------- row mapping (camelCase in the app, snake_case in Postgres) ---------- */
 
-function toRows(d: AppData, userId: string): Rows {
+export function toRows(d: AppData, userId: string): Rows {
   const ids = new Set(d.projects.map((p) => p.id));
   const pid = (id: string) => (ids.has(id) ? id : null);
   const cids = new Set(d.clients.map((c) => c.id));
@@ -64,12 +69,13 @@ function toRows(d: AppData, userId: string): Rows {
       user_id: userId, name: d.profile.name, email: d.profile.email, company: d.profile.company,
       currency: d.profile.currency, target_pct: d.profile.targetPct, alert_pct: d.profile.alertPct,
       avatar: d.profile.avatar, invest_isin: d.profile.investIsin, invest_mic: d.profile.investMic, invest_name: d.profile.investName,
+      revenue_goal: d.profile.revenueGoal,
     },
     clients: d.clients.map((c: Client) => ({ id: c.id, name: c.name, color: c.color })),
     projects: d.projects.map((p: Project) => ({
       id: p.id, name: p.name, client_id: cid(p.clientId), start: orNull(p.start), deadline: orNull(p.deadline),
       status: p.status, position: p.position, brief_context: p.brief.context, brief_goal: p.brief.goal,
-      brief_deliverables: p.brief.deliverables, brief_out: p.brief.out,
+      brief_deliverables: p.brief.deliverables, brief_out: p.brief.out, budget: p.budget,
     })),
     investments: d.investments.map((x: Investment) => ({
       id: x.id, date: x.date, amount: x.amount, price: x.price > 0 ? x.price : null, close: x.close > 0 ? x.close : null,
@@ -85,16 +91,21 @@ function toRows(d: AppData, userId: string): Rows {
     })),
     entries: d.entries.map((e: Entry) => ({
       id: e.id, date: e.date, label: e.label, type: e.type, category: e.category, amount: e.amount,
-      project_id: pid(e.projectId),
+      project_id: pid(e.projectId), paid: e.paid, due: orNull(e.due),
+    })),
+    time_entries: d.timeEntries.map((x: TimeEntry) => ({
+      id: x.id, project_id: pid(x.projectId), task_id: orNull(x.taskId), date: x.date, minutes: x.minutes, note: x.note,
+      started_at: orNull(x.startedAt),
     })),
     tasks: d.tasks.map((t: Task) => ({
       id: t.id, title: t.title, col: t.col, client_id: cid(t.clientId), project_id: pid(t.projectId),
-      due: orNull(t.due), note: t.note, position: t.position, done_at: orNull(t.doneAt),
+      due: orNull(t.due), note: t.note, position: t.position, done_at: orNull(t.doneAt), priority: t.priority,
+      checklist: t.checklist,
     })),
   };
 }
 
-function fromRows(r: { profile: Row | null; clients: Row[]; projects: Row[]; tasks: Row[]; entries: Row[]; recurring: Row[]; notes: Row[]; investments: Row[] }): Partial<AppData> {
+export function fromRows(r: { profile: Row | null; clients: Row[]; projects: Row[]; tasks: Row[]; entries: Row[]; recurring: Row[]; notes: Row[]; investments: Row[]; time_entries: Row[] }): Partial<AppData> {
   const p = r.profile;
   return {
     profile: p
@@ -102,6 +113,7 @@ function fromRows(r: { profile: Row | null; clients: Row[]; projects: Row[]; tas
           name: str(p.name), email: str(p.email), company: str(p.company), currency: str(p.currency) || 'EUR',
           targetPct: Number(p.target_pct ?? 30), alertPct: Number(p.alert_pct ?? 12), avatar: str(p.avatar),
           investIsin: str(p.invest_isin), investMic: str(p.invest_mic), investName: str(p.invest_name),
+          revenueGoal: Number(p.revenue_goal ?? 0),
         }
       : undefined,
     clients: r.clients.map((x) => ({ id: str(x.id), name: str(x.name), color: str(x.color) })),
@@ -109,6 +121,7 @@ function fromRows(r: { profile: Row | null; clients: Row[]; projects: Row[]; tas
       id: str(x.id), name: str(x.name), clientId: str(x.client_id), start: str(x.start), deadline: str(x.deadline),
       status: str(x.status) as Project['status'], position: Number(x.position),
       brief: { context: str(x.brief_context), goal: str(x.brief_goal), deliverables: str(x.brief_deliverables), out: str(x.brief_out) },
+      budget: Number(x.budget ?? 0),
     })),
     investments: r.investments.map((x) => ({
       id: str(x.id), date: str(x.date), amount: Number(x.amount), price: Number(x.price ?? 0), close: Number(x.close ?? 0),
@@ -121,10 +134,17 @@ function fromRows(r: { profile: Row | null; clients: Row[]; projects: Row[]; tas
       id: str(x.id), title: str(x.title), col: str(x.col) as Task['col'], clientId: str(x.client_id), projectId: str(x.project_id),
       due: str(x.due), note: str(x.note), position: Number(x.position),
       doneAt: x.done_at ? new Date(str(x.done_at)).toISOString() : '',
+      priority: (str(x.priority) || 'none') as Task['priority'],
+      checklist: Array.isArray(x.checklist) ? (x.checklist as Task['checklist']) : [],
     })),
     entries: r.entries.map((x) => ({
       id: str(x.id), date: str(x.date), label: str(x.label), type: str(x.type) as Entry['type'],
       category: str(x.category), amount: Number(x.amount), projectId: str(x.project_id),
+      paid: x.paid !== false, due: str(x.due),
+    })),
+    timeEntries: r.time_entries.map((x) => ({
+      id: str(x.id), projectId: str(x.project_id), taskId: str(x.task_id), date: str(x.date), minutes: Number(x.minutes ?? 0),
+      note: str(x.note), startedAt: x.started_at ? new Date(str(x.started_at)).toISOString() : '',
     })),
     recurring: r.recurring.map((x) => ({
       id: str(x.id), label: str(x.label), type: str(x.type) as Recurring['type'], category: str(x.category),
@@ -149,7 +169,7 @@ export function createSupabaseRepository(db: SupabaseClient, userId: string): Re
 
   /** Read everything. Pure: does not touch base. */
   async function read() {
-    const [profile, clients, projects, tasks, entries, recurring, notes, investments] = await Promise.all([
+    const [profile, clients, projects, tasks, entries, recurring, notes, investments, time_entries] = await Promise.all([
       db.from('profiles').select('*').eq('user_id', userId).maybeSingle(),
       fetchAll(db, 'clients', 'name'),
       fetchAll(db, 'projects', 'position'),
@@ -158,11 +178,15 @@ export function createSupabaseRepository(db: SupabaseClient, userId: string): Re
       fetchAll(db, 'recurring', 'created_at'),
       fetchAll(db, 'notes', 'created_at'),
       fetchAll(db, 'investments', 'date'),
+      fetchAll(db, 'time_entries', 'date').catch((e: DbError) => {
+        // Table missing: the database was set up before this version and needs its update.
+        throw e?.code === 'PGRST205' || e?.code === '42P01' ? new Error(SCHEMA_OUTDATED) : e;
+      }),
     ]);
     if (profile.error) throw profile.error;
-    const empty = !profile.data && !clients.length && !projects.length && !tasks.length && !entries.length && !recurring.length && !notes.length && !investments.length;
+    const empty = !profile.data && !clients.length && !projects.length && !tasks.length && !entries.length && !recurring.length && !notes.length && !investments.length && !time_entries.length;
     // Base comes from exactly what the UI will hold: a row normalize() drops is left alone in the DB.
-    const data = normalize(fromRows({ profile: profile.data, clients, projects, tasks, entries, recurring, notes, investments }));
+    const data = normalize(fromRows({ profile: profile.data, clients, projects, tasks, entries, recurring, notes, investments, time_entries }));
     const rows = toRows(data, userId);
     const nextBase: Base = {
       profile: profile.data ? rows.profile : null,
@@ -174,6 +198,7 @@ export function createSupabaseRepository(db: SupabaseClient, userId: string): Re
         tasks: new Map(rows.tasks.map((r) => [r.id as string, r])),
         notes: new Map(rows.notes.map((r) => [r.id as string, r])),
         investments: new Map(rows.investments.map((r) => [r.id as string, r])),
+        time_entries: new Map(rows.time_entries.map((r) => [r.id as string, r])),
       },
     };
     return { data: empty ? null : data, base: nextBase };
@@ -186,7 +211,7 @@ export function createSupabaseRepository(db: SupabaseClient, userId: string): Re
     if (!auth.session) throw new Error('No active session');
     const b: Base = base ?? {
       profile: null,
-      tables: { clients: new Map(), projects: new Map(), recurring: new Map(), entries: new Map(), tasks: new Map(), notes: new Map(), investments: new Map() },
+      tables: emptyTables(),
     };
     base = b;
     const next = toRows(data, userId);
@@ -273,8 +298,8 @@ export function createSupabaseRepository(db: SupabaseClient, userId: string): Re
     const ok =
       (await run([...profileJobs, ...tableJobs('clients')])) &&
       (await run(tableJobs('projects'))) &&
-      (await run([...tableJobs('recurring'), ...tableJobs('entries'), ...tableJobs('tasks'), ...tableJobs('notes'), ...tableJobs('investments')])) &&
-      (await run([...deleteJobs('tasks'), ...deleteJobs('entries'), ...deleteJobs('recurring'), ...deleteJobs('notes'), ...deleteJobs('investments')])) &&
+      (await run([...tableJobs('recurring'), ...tableJobs('entries'), ...tableJobs('tasks'), ...tableJobs('notes'), ...tableJobs('investments'), ...tableJobs('time_entries')])) &&
+      (await run([...deleteJobs('tasks'), ...deleteJobs('entries'), ...deleteJobs('recurring'), ...deleteJobs('notes'), ...deleteJobs('investments'), ...deleteJobs('time_entries')])) &&
       (await run(deleteJobs('projects'))) &&
       (await run(deleteJobs('clients')));
     if (ok) return;
@@ -297,6 +322,7 @@ export function createSupabaseRepository(db: SupabaseClient, userId: string): Re
       };
       if (stale.projects.length || stale.clients.length) throw new RejectedError('Deleted on another device', stale);
     }
+    if (err && err.code === 'PGRST204') throw new RejectedError('The database needs an update (see "Updating" in the README)');
     if (err && isPermanent(err)) throw new RejectedError(err.message ?? 'Change rejected');
     throw err ?? new Error('Could not save');
   }

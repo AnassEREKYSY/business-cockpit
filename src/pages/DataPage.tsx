@@ -2,6 +2,9 @@ import { useRef, useState } from 'react';
 import { ColorPicker } from '../components/ColorPicker';
 import { EntryModal, FREQ_OPTIONS, RecurringModal, TYPE_OPTIONS, catOptions } from '../components/MoneyForms';
 import { useConfirm } from '../components/Confirm';
+import { useToast } from '../components/Toast';
+import { isOverdue } from '../lib/stats';
+import { removeClient, removeRow } from '../lib/undo';
 import { DatePicker } from '../components/Calendar';
 import { ProjectSelect } from '../components/pickers';
 import { Select } from '../components/Select';
@@ -17,7 +20,7 @@ import type { AppData, Client, Entry, EntryType, Recurring } from '../types';
 type Update = (fn: (d: AppData) => AppData) => void;
 
 const emptyEntry = (): Omit<Entry, 'id' | 'amount'> & { amount: string } => ({
-  date: isoDate(), label: '', type: 'revenue', category: CATEGORIES.revenue[0], amount: '', projectId: '',
+  date: isoDate(), label: '', type: 'revenue', category: CATEGORIES.revenue[0], amount: '', projectId: '', paid: true, due: '',
 });
 const emptyRec = (): Omit<Recurring, 'id' | 'amount'> & { amount: string } => ({
   label: '', type: 'opex', category: 'Software & SaaS', amount: '', frequency: 'monthly', start: isoDate(), end: '', projectId: '',
@@ -32,9 +35,9 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
   const projectName = (id: string) => data.projects.find((p) => p.id === id)?.name ?? '';
 
   const [ef, setEf] = useState(emptyEntry);
-  const [added, setAdded] = useState('');
   const [rf, setRf] = useState(emptyRec);
-  const [recAdded, setRecAdded] = useState('');
+  const toast = useToast();
+  const [goal, setGoal] = useState(P.revenueGoal ? String(P.revenueGoal) : '');
   const [txFilter, setTxFilter] = useState<'all' | EntryType>('all');
   const fileRef = useRef<HTMLInputElement>(null);
   const [editingRec, setEditingRec] = useState<Recurring | null>(null);
@@ -56,17 +59,24 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
     const amount = parseAmount(ef.amount);
     if (!amount || !isDay(ef.date)) return;
     const label = ef.label.trim() || catLabel(ef.category);
-    update((d) => ({ ...d, entries: [...d.entries, { id: uid(), ...ef, label, amount }] }));
+    const id = uid();
+    const revenue = ef.type === 'revenue';
+    update((d) => ({ ...d, entries: [...d.entries, { id, ...ef, label, amount, paid: !revenue || ef.paid, due: revenue && !ef.paid ? ef.due : '' }] }));
     setEf({ ...emptyEntry(), type: ef.type, category: ef.category, date: ef.date, projectId: ef.projectId });
-    setAdded(`${TYPE_META[ef.type].label} "${label}" added: ${m(amount)}.`);
+    toast(<>{TYPE_META[ef.type].label} <b>{label}</b> added: {m(amount)}{revenue && !ef.paid ? ' (unpaid)' : ''}</>, {
+      undo: () => update((d) => ({ ...d, entries: d.entries.filter((x) => x.id !== id) })),
+    });
   };
 
   const addRec = () => {
     const amount = parseAmount(rf.amount);
     if (!amount || !rf.label.trim() || !isDay(rf.start)) return;
-    update((d) => ({ ...d, recurring: [...d.recurring, { id: uid(), ...rf, label: rf.label.trim(), amount }] }));
+    const id = uid();
+    update((d) => ({ ...d, recurring: [...d.recurring, { id, ...rf, label: rf.label.trim(), amount }] }));
     setRf({ ...emptyRec(), type: rf.type, category: rf.category });
-    setRecAdded(`"${rf.label.trim()}" added. It will be counted automatically every ${rf.frequency === 'monthly' ? 'month' : 'year'}.`);
+    toast(<><b>{rf.label.trim()}</b> added, counted every {rf.frequency === 'monthly' ? 'month' : 'year'}</>, {
+      undo: () => update((d) => ({ ...d, recurring: d.recurring.filter((x) => x.id !== id) })),
+    });
   };
 
   // Stopping keeps the history: charges up to today stay, nothing is charged after.
@@ -75,15 +85,28 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
   // Restarting opens a new period from today, so the months while it was stopped stay uncharged.
   const restartRec = (r: Recurring) =>
     update((d) => ({ ...d, recurring: [...d.recurring, { ...r, id: uid(), start: isoDate(), end: '' }] }));
-  const removeRec = async (r: Recurring) => {
-    const ok = await confirm({
-      title: 'Delete this subscription?',
-      message: <>"{r.label}" and all its history will be removed from your finances. To stop it and keep the history, use "Stop" instead.</>,
-      confirmLabel: 'Delete',
-      danger: true,
+  // Deleting removes the whole history; Undo brings it back. "Stop" keeps the history.
+  const removeRec = (r: Recurring) => {
+    const { restore } = removeRow(data, 'recurring', r.id);
+    update((d) => removeRow(d, 'recurring', r.id).data);
+    toast(<><b>{r.label}</b> and its history deleted</>, { undo: () => update(restore) });
+  };
+  const removeEntry = (e: Entry) => {
+    const { restore } = removeRow(data, 'entries', e.id);
+    update((d) => removeRow(d, 'entries', e.id).data);
+    toast(<><b>{e.label}</b> deleted</>, { undo: () => update(restore) });
+  };
+  const togglePaid = (e: Entry) => {
+    update((d) => ({ ...d, entries: d.entries.map((x) => (x.id === e.id ? { ...x, paid: !x.paid } : x)) }));
+    toast(e.paid ? <><b>{e.label}</b> marked unpaid</> : <><b>{e.label}</b> marked paid</>, {
+      tone: e.paid ? 'default' : 'success',
+      undo: () => update((d) => ({ ...d, entries: d.entries.map((x) => (x.id === e.id ? { ...x, paid: e.paid } : x)) })),
     });
-    if (!ok) return;
-    update((d) => ({ ...d, recurring: d.recurring.filter((x) => x.id !== r.id) }));
+  };
+  const saveGoal = (raw: string) => {
+    const v = raw.trim() ? parseAmount(raw) : 0;
+    if (v === null) return setGoal(P.revenueGoal ? String(P.revenueGoal) : '');
+    update((d) => ({ ...d, profile: { ...d.profile, revenueGoal: v } }));
   };
 
   const rank = (r: Recurring) => (isActive(r) ? 0 : isFuture(r) ? 1 : 2);
@@ -123,7 +146,10 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
       confirmLabel: 'Replace',
       danger: true,
     });
-    if (ok) update(() => normalize(parsed));
+    if (!ok) return;
+    const before = data;
+    update(() => normalize(parsed));
+    toast('Backup imported', { undo: () => update(() => before) });
   };
   const loadDemo = async () => {
     const ok = await confirm({
@@ -132,16 +158,22 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
       confirmLabel: 'Replace',
       danger: true,
     });
-    if (ok) update((d) => demoData(d.profile));
+    if (!ok) return;
+    const before = data;
+    update((d) => demoData(d.profile));
+    toast('Demo data loaded', { undo: () => update(() => before) });
   };
   const clearAll = async () => {
     const ok = await confirm({
       title: 'Clear everything?',
-      message: 'Clients, projects (with their briefs and journals), tasks, transactions and subscriptions will be deleted. Your profile is kept.',
+      message: 'Clients, projects (with their briefs and journals), tasks, transactions, subscriptions and tracked time will be deleted. Your profile is kept.',
       confirmLabel: 'Clear everything',
       danger: true,
     });
-    if (ok) update((d) => ({ ...d, clients: [], projects: [], tasks: [], entries: [], recurring: [], notes: [], investments: [] }));
+    if (!ok) return;
+    const before = data;
+    update((d) => ({ ...d, clients: [], projects: [], tasks: [], entries: [], recurring: [], notes: [], investments: [], timeEntries: [] }));
+    toast('Everything cleared', { undo: () => update(() => before) });
   };
 
   const openProjects = data.projects.filter((p) => p.status !== 'Done' || p.id === ef.projectId || p.id === rf.projectId);
@@ -173,6 +205,17 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
             <Field label="Currency">
               <Select value={P.currency} onChange={(v) => setProfile('currency', v)} options={CURRENCY_OPTIONS} ariaLabel="Currency" />
             </Field>
+            <Field label={`Monthly revenue goal (${P.currency})`}>
+              <input
+                className="input"
+                inputMode="decimal"
+                value={goal}
+                placeholder="Optional, shown on the Overview"
+                onChange={(e) => setGoal(e.target.value)}
+                onBlur={(e) => saveGoal(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+              />
+            </Field>
           </div>
         </div>
 
@@ -194,10 +237,19 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
               <ProjectSelect projects={openProjects} clients={data.clients} value={ef.projectId} onChange={(projectId) => setEf({ ...ef, projectId })} />
             </Field>
             <Field label={`Amount excl. tax (${P.currency})`}><input className="input" inputMode="decimal" value={ef.amount} onChange={(e) => setEf({ ...ef, amount: e.target.value })} placeholder="0" /></Field>
+            {ef.type === 'revenue' && (
+              <Field label="Payment">
+                <Seg label="Payment" value={ef.paid ? 'paid' : 'unpaid'} onChange={(v) => setEf({ ...ef, paid: v === 'paid' })} options={[['paid', 'Paid'], ['unpaid', 'Waiting']]} />
+              </Field>
+            )}
+            {ef.type === 'revenue' && !ef.paid && (
+              <Field label="Payment due">
+                <DatePicker value={ef.due} onChange={(due) => setEf({ ...ef, due })} min={ef.date} placeholder="No due date" ariaLabel="Payment due" />
+              </Field>
+            )}
             <button className="btn tall" type="submit" disabled={!efAmount}>Add</button>
           </form>
           {ef.amount.trim() && !efAmount && <div className="small" style={{ color: 'var(--red)' }}>{badAmount}</div>}
-          {added && <div className="ok-msg" role="status">{added}</div>}
         </div>
       </div>
 
@@ -230,7 +282,6 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
           <button className="btn tall" type="submit" disabled={!rf.label.trim() || !rfAmount}>Add</button>
         </form>
         {rf.amount.trim() && !rfAmount && <div className="small" style={{ color: 'var(--red)' }}>{badAmount}</div>}
-        {recAdded && <div className="ok-msg" role="status">{recAdded}</div>}
         {data.recurring.length > 0 && (
           <div className="table-wrap">
             <div className="trow th t-recur"><span>Name</span><span>Type</span><span>Category</span><span className="r">Amount</span><span className="r">Per month</span><span /><span /></div>
@@ -259,7 +310,7 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
                   )}
                   <span className="row-actions">
                     <button className="icon-btn" onClick={() => setEditingRec(r)} title="Edit" aria-label={`Edit ${r.label}`}><IconPencil /></button>
-                    <button className="icon-btn danger" onClick={() => void removeRec(r)} title="Delete" aria-label={`Delete ${r.label}`}>
+                    <button className="icon-btn danger" onClick={() => removeRec(r)} title="Delete" aria-label={`Delete ${r.label}`}>
                       <span style={{ fontSize: '1.0625rem', lineHeight: 1 }}>×</span>
                     </button>
                   </span>
@@ -279,7 +330,7 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
           </div>
         </div>
         <div className="table-wrap scroll">
-          <div className="trow th t-entries"><span>Date</span><span>Label</span><span>Type</span><span>Category</span><span>Project</span><span className="r">Amount</span><span /></div>
+          <div className="trow th t-entries"><span>Date</span><span>Label</span><span>Type</span><span>Category</span><span>Project</span><span>Status</span><span className="r">Amount</span><span /></div>
           {entries.map((e) => (
             <div className="trow t-entries" key={e.id}>
               <span style={{ color: 'var(--muted)' }}>{fmtDate(e.date, true)}{e.date.slice(0, 4) !== String(new Date().getFullYear()) ? ` ${e.date.slice(0, 4)}` : ''}</span>
@@ -287,10 +338,19 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
               <span className="tag" style={{ justifySelf: 'start', background: TYPE_META[e.type].bg, color: TYPE_META[e.type].color }}>{TYPE_META[e.type].short}</span>
               <span className="ellipsis" style={{ color: 'var(--ink-2)' }}>{catLabel(e.category)}</span>
               <span className="ellipsis" style={{ color: 'var(--muted)' }}>{projectName(e.projectId) || '—'}</span>
+              {e.type === 'revenue' ? (
+                <button
+                  className={'pay-chip' + (e.paid ? ' paid' : isOverdue(e) ? ' late' : ' waiting')}
+                  onClick={() => togglePaid(e)}
+                  title={e.paid ? 'Mark as unpaid' : 'Mark as paid'}
+                >
+                  {e.paid ? 'Paid' : isOverdue(e) ? 'Late' : 'Waiting'}
+                </button>
+              ) : <span className="small">—</span>}
               <b className="r" style={{ color: e.type === 'revenue' ? 'var(--green)' : 'var(--ink)' }}>{e.type === 'revenue' ? '+ ' : '− '}{m(e.amount)}</b>
               <span className="row-actions">
                 <button className="icon-btn" onClick={() => setEditingEntry(e)} title="Edit" aria-label={`Edit ${e.label}`}><IconPencil /></button>
-                <button className="icon-btn danger" title="Delete" aria-label={`Delete ${e.label}`} onClick={() => update((d) => ({ ...d, entries: d.entries.filter((x) => x.id !== e.id) }))}>
+                <button className="icon-btn danger" title="Delete" aria-label={`Delete ${e.label}`} onClick={() => removeEntry(e)}>
                   <span style={{ fontSize: '1.0625rem', lineHeight: 1 }}>×</span>
                 </button>
               </span>
@@ -331,6 +391,7 @@ function Clients({ data, update }: { data: AppData; update: Update }) {
   const [color, setColor] = useState(() => nextColor(data.clients.map((c) => c.color)));
   const [dup, setDup] = useState('');
   const confirm = useConfirm();
+  const toast = useToast();
 
   // A task counts for the client it is tagged with, or else for its project's client (as on the board).
   const projectClient = new Map(data.projects.map((p) => [p.id, p.clientId]));
@@ -367,12 +428,9 @@ function Clients({ data, update }: { data: AppData; update: Update }) {
       danger: true,
     });
     if (!ok) return;
-    update((d) => ({
-      ...d,
-      clients: d.clients.filter((x) => x.id !== c.id),
-      projects: d.projects.map((p) => (p.clientId === c.id ? { ...p, clientId: '' } : p)),
-      tasks: d.tasks.map((t) => (t.clientId === c.id ? { ...t, clientId: '' } : t)),
-    }));
+    const { restore } = removeClient(data, c.id);
+    update((d) => removeClient(d, c.id).data);
+    toast(<>Client <b>{c.name}</b> deleted</>, { undo: () => update(restore) });
   };
 
   return (

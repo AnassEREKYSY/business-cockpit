@@ -2,6 +2,7 @@ import { isAuthRetryableFetchError, type Session } from '@supabase/supabase-js';
 import { Component, useEffect, useMemo, useState, type ReactNode } from 'react';
 import App, { Loading } from './App';
 import { ConfirmProvider } from './components/Confirm';
+import { ToastProvider } from './components/Toast';
 import { createSupabaseRepository } from './lib/remote';
 import { localRepository } from './lib/store';
 import { configError, supabase } from './lib/supabase';
@@ -14,7 +15,7 @@ export default function Root() {
       {configError ? (
         <SetupError message={configError} />
       ) : (
-        <ConfirmProvider>{supabase ? <AuthGate /> : <App repo={localRepository} />}</ConfirmProvider>
+        <ToastProvider><ConfirmProvider>{supabase ? <AuthGate /> : <App repo={localRepository} />}</ConfirmProvider></ToastProvider>
       )}
     </Boundary>
   );

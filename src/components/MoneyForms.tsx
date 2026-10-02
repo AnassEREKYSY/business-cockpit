@@ -1,14 +1,16 @@
 import { useState } from 'react';
 import { CATEGORIES, TYPE_META, catLabel } from '../lib/constants';
 import { parseAmount } from '../lib/finance';
-import { money } from '../lib/format';
+import { isoDate, money } from '../lib/format';
 import { isDay } from '../lib/store';
 import type { AppData, Entry, EntryType, Recurring } from '../types';
 import { DatePicker } from './Calendar';
-import { useConfirm } from './Confirm';
+import { useToast } from './Toast';
+import { removeRow } from '../lib/undo';
+import { uid } from '../lib/format';
 import { ProjectSelect } from './pickers';
 import { Select } from './Select';
-import { Field, Modal } from './ui';
+import { Field, Modal, Seg } from './ui';
 
 /* Edit forms for money rows, opened from Finances and from Data & profile. */
 
@@ -90,32 +92,47 @@ export function RecurringModal({ item, data, update, onClose }: { item: Recurrin
 
 /* ---------------- Edit a one-off transaction ---------------- */
 
+/** A blank transaction, opened in EntryModal to create one. */
+export const newEntry = (type: EntryType = 'revenue'): Entry => ({
+  id: uid(), date: isoDate(), label: '', type, category: CATEGORIES[type][0], amount: 0, projectId: '', paid: true, due: '',
+});
+
 export function EntryModal({ entry, data, update, onClose }: { entry: Entry; data: AppData; update: Update; onClose: () => void }) {
   const [orig] = useState(entry);
-  const [f, setF] = useState({ ...entry, amount: String(entry.amount) });
-  const confirm = useConfirm();
+  const [f, setF] = useState({ ...entry, amount: entry.amount ? String(entry.amount) : '' });
+  const [creating] = useState(() => !data.entries.some((e) => e.id === entry.id));
+  const toast = useToast();
   const amount = parseAmount(f.amount);
-  const valid = !!amount && isDay(f.date);
+  const valid = !!amount && isDay(f.date) && (!f.due || isDay(f.due));
   const projects = data.projects.filter((p) => p.status !== 'Done' || p.id === f.projectId);
+  const revenue = f.type === 'revenue';
 
   const save = () => {
     if (!valid || !amount) return;
-    const next: Entry = { ...f, label: f.label.trim() || catLabel(f.category), amount };
+    const next: Entry = { ...f, label: f.label.trim() || catLabel(f.category), amount, paid: !revenue || f.paid, due: revenue && !f.paid ? f.due : '' };
+    if (creating) {
+      update((d) => ({ ...d, entries: [...d.entries, next] }));
+      toast(<>{TYPE_META[next.type].label} <b>{next.label}</b> added: {money(amount, data.profile.currency)}</>, {
+        undo: () => update((d) => ({ ...d, entries: d.entries.filter((e) => e.id !== next.id) })),
+      });
+      onClose();
+      return;
+    }
     const changed = Object.fromEntries(
       (Object.keys(next) as (keyof Entry)[]).filter((k) => next[k] !== orig[k]).map((k) => [k, next[k]]),
     ) as Partial<Entry>;
     update((d) => ({ ...d, entries: d.entries.map((e) => (e.id === entry.id ? { ...e, ...changed } : e)) }));
     onClose();
   };
-  const remove = async () => {
-    const ok = await confirm({ title: 'Delete this transaction?', message: `${entry.label} · ${money(entry.amount, data.profile.currency)}`, confirmLabel: 'Delete', danger: true });
-    if (!ok) return;
-    update((d) => ({ ...d, entries: d.entries.filter((e) => e.id !== entry.id) }));
+  const remove = () => {
+    const { restore } = removeRow(data, 'entries', entry.id);
+    update((d) => removeRow(d, 'entries', entry.id).data);
+    toast(<><b>{entry.label}</b> deleted</>, { undo: () => update(restore) });
     onClose();
   };
 
   return (
-    <Modal title="Edit transaction" onClose={onClose}>
+    <Modal title={creating ? 'New transaction' : 'Edit transaction'} onClose={onClose}>
       <form className="section" onSubmit={(e) => { e.preventDefault(); save(); }}>
         <div className="form-grid">
           <Field label="Date"><DatePicker value={f.date} onChange={(date) => setF({ ...f, date })} clearable={false} ariaLabel="Date" /></Field>
@@ -130,15 +147,25 @@ export function EntryModal({ entry, data, update, onClose }: { entry: Entry; dat
             <ProjectSelect projects={projects} clients={data.clients} value={f.projectId} onChange={(projectId) => setF({ ...f, projectId })} />
           </Field>
           <Field label={`Amount excl. tax (${data.profile.currency})`}>
-            <input className="input" inputMode="decimal" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
+            <input className="input" inputMode="decimal" autoFocus={creating} value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} placeholder="0" />
           </Field>
+          {revenue && (
+            <Field label="Payment">
+              <Seg label="Payment" value={f.paid ? 'paid' : 'unpaid'} onChange={(v) => setF({ ...f, paid: v === 'paid' })} options={[['paid', 'Paid'], ['unpaid', 'Waiting']]} />
+            </Field>
+          )}
+          {revenue && !f.paid && (
+            <Field label="Payment due">
+              <DatePicker value={f.due} onChange={(due) => setF({ ...f, due })} min={isDay(f.date) ? f.date : undefined} placeholder="No due date" ariaLabel="Payment due" />
+            </Field>
+          )}
         </div>
         {f.amount.trim() && !amount && <div className="small" style={{ color: 'var(--red)' }}>Invalid amount. Examples: 1200 · 1 200 · 1200.50</div>}
         <div className="modal-foot">
-          <button className="btn sm danger" type="button" onClick={() => void remove()}>Delete</button>
+          {creating ? <span /> : <button className="btn sm danger" type="button" onClick={remove}>Delete</button>}
           <div className="row" style={{ gap: '0.5rem' }}>
             <button className="btn sm ghost" type="button" onClick={onClose}>Cancel</button>
-            <button className="btn sm" type="submit" disabled={!valid}>Save</button>
+            <button className="btn sm" type="submit" disabled={!valid}>{creating ? 'Add' : 'Save'}</button>
           </div>
         </div>
       </form>

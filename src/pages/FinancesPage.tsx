@@ -4,14 +4,18 @@ import { Seg } from '../components/ui';
 import { catLabel } from '../lib/constants';
 import { allTxns, isActive, monthlyEquivalent, sumType, totals } from '../lib/finance';
 import { fmtDate, fmtMonth, money, monthEnd, monthKey, pct, shiftMonth } from '../lib/format';
-import { EntryModal, RecurringModal } from '../components/MoneyForms';
+import { EntryModal, RecurringModal, newEntry } from '../components/MoneyForms';
+import { useToast } from '../components/Toast';
+import { isOverdue, projectStats, unpaidInvoices } from '../lib/stats';
+import { fmtDuration } from '../lib/time';
 import type { AppData, Entry, Recurring } from '../types';
 
 type Update = (fn: (d: AppData) => AppData) => void;
 
 type Period = '1m' | '3m' | '12m' | 'all';
 
-export default function FinancesPage({ data, update, goToData }: { data: AppData; update: Update; goToData: () => void }) {
+export default function FinancesPage({ data, update, openProject }: { data: AppData; update: Update; openProject: (id: string) => void }) {
+  const toast = useToast();
   // Clicking a recent transaction opens its edit form (a recurring line opens the subscription).
   const [editing, setEditing] = useState<{ entry?: Entry; recurring?: Recurring } | null>(null);
   const [period, setPeriod] = useState<Period>('1m');
@@ -39,11 +43,26 @@ export default function FinancesPage({ data, update, goToData }: { data: AppData
   const fixedRev = activeRec.filter((r) => r.type === 'revenue').reduce((a, r) => a + monthlyEquivalent(r), 0);
 
   const revCount = inPeriod.filter((e) => e.type === 'revenue').length;
+  const unpaid = unpaidInvoices(data);
+  const toCollect = unpaid.reduce((a, e) => a + e.amount, 0);
+  const late = unpaid.filter((e) => isOverdue(e)).length;
+  const markPaid = (e: Entry) => {
+    update((d) => ({ ...d, entries: d.entries.map((x) => (x.id === e.id ? { ...x, paid: true, due: '' } : x)) }));
+    toast(<><b>{e.label}</b> marked paid · {m(e.amount)}</>, {
+      tone: 'success',
+      undo: () => update((d) => ({ ...d, entries: d.entries.map((x) => (x.id === e.id ? { ...x, paid: false, due: e.due } : x)) })),
+    });
+  };
+  const projectRows = data.projects
+    .map((p) => ({ p, s: projectStats(data, p.id, txns) }))
+    .filter((r) => r.s.revenue || r.s.costs || r.s.minutes || r.p.budget)
+    .sort((a, b) => b.s.revenue - a.s.revenue);
   const subCount = activeRec.filter((r) => r.type !== 'revenue').length;
   const kpis = [
     { label: 'Revenue', value: m(T.rev), sub: `${revCount} ${revCount === 1 ? 'payment' : 'payments'} received`, color: 'var(--muted)', dot: 'var(--c-rev)' },
     { label: 'Expenses', value: m(T.charges), sub: T.rev ? `${pct((T.charges / T.rev) * 100)} of revenue` : 'No revenue in this period', color: 'var(--muted)', dot: 'var(--c-exp)' },
     { label: 'Net profit', value: m(T.net), sub: T.rev ? `Net margin ${pct(T.netRate)}` : '—', color: T.rev ? tone(T.net) : 'var(--muted)', dot: 'var(--c-pos)' },
+    { label: 'To collect', value: m(toCollect), sub: unpaid.length ? `${unpaid.length} unpaid${late ? ` · ${late} late` : ''}` : 'All invoices paid', color: late ? 'var(--red)' : 'var(--muted)', dot: 'var(--c-warn)' },
     { label: 'Fixed costs / month', value: m(fixedCost), sub: `${subCount} active ${subCount === 1 ? 'subscription' : 'subscriptions'}${fixedRev ? ` · recurring income ${m(fixedRev)}` : ''}`, color: 'var(--muted)', dot: 'var(--c-warn)' },
   ];
 
@@ -110,7 +129,7 @@ export default function FinancesPage({ data, update, goToData }: { data: AppData
         <div className="row">
           <Seg label="Period" value={period} onChange={setPeriod} options={[['1m', 'Month'], ['3m', '3 months'], ['12m', '12 months'], ['all', 'All time']]} />
           {period !== 'all' && <MonthPicker value={anchor} onChange={setAnchor} ariaLabel="Month shown" />}
-          <button className="btn" onClick={goToData}>+ Add a transaction</button>
+          <button className="btn" onClick={() => setEditing({ entry: newEntry() })}>+ Add a transaction</button>
         </div>
       </div>
 
@@ -123,6 +142,35 @@ export default function FinancesPage({ data, update, goToData }: { data: AppData
           </div>
         ))}
       </div>
+
+      {unpaid.length > 0 && (
+        <div className="card" style={{ gap: '0.5rem' }}>
+          <div className="head">
+            <div>
+              <div className="card-title">Waiting for payment <span className="small" style={{ fontWeight: 500 }}>{unpaid.length}</span></div>
+              <div className="small">Invoices sent but not paid yet. They count in your revenue; mark them paid when the money arrives.</div>
+            </div>
+            <div className="collect-total">{m(toCollect)}</div>
+          </div>
+          <div className="table-wrap">
+            {unpaid.map((e) => {
+              const lateDays = isOverdue(e) ? Math.round((Date.now() - Date.parse(e.due + 'T12:00:00')) / 86_400_000) : 0;
+              const project = data.projects.find((p) => p.id === e.projectId);
+              return (
+                <div className="trow t-unpaid" key={e.id}>
+                  <span className={'pay-chip' + (lateDays ? ' late' : ' waiting')}>{lateDays ? `${lateDays}d late` : e.due ? `Due ${fmtDate(e.due, true)}` : 'No due date'}</span>
+                  <button className="unpaid-label" onClick={() => setEditing({ entry: e })} title="Edit this invoice">
+                    <span className="ellipsis" style={{ fontWeight: 600 }}>{e.label}</span>
+                    <span className="small ellipsis">Sent {fmtDate(e.date, true)}{project ? ` · ${project.name}` : ''}</span>
+                  </button>
+                  <b className="r">{m(e.amount)}</b>
+                  <button className="btn sm outline" onClick={() => markPaid(e)}>Mark paid</button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="grid-2 stretch">
         <div className="card" style={{ gap: '1.125rem' }}>
@@ -230,6 +278,44 @@ export default function FinancesPage({ data, update, goToData }: { data: AppData
           {recent.length === 0 && <div className="small">No transactions in this period.</div>}
         </div>
       </div>
+
+      {projectRows.length > 0 && (
+        <div className="card" style={{ gap: '0.375rem' }}>
+          <div className="head">
+            <div className="card-title">Project profitability</div>
+            <div className="small">All time, everything linked to each project · time from the tracker</div>
+          </div>
+          <div className="table-wrap">
+            <div className="trow th t-profit"><span>Project</span><span className="r">Revenue</span><span className="r">Costs</span><span className="r">Margin</span><span>Budget</span><span className="r">Time</span><span className="r">Per hour</span></div>
+            {projectRows.map(({ p, s: st }) => {
+              const client = data.clients.find((c) => c.id === p.clientId);
+              return (
+                <button type="button" className="trow t-profit t-click" key={p.id} onClick={() => openProject(p.id)} title="Open project">
+                  <span className="row ellipsis" style={{ gap: '0.5rem', flexWrap: 'nowrap', fontWeight: 600 }}>
+                    <span className="swatch" style={{ background: client?.color ?? 'var(--line-strong)' }} />
+                    <span className="ellipsis">{p.name}</span>
+                  </span>
+                  <span className="r">{m(st.revenue)}</span>
+                  <span className="r" style={{ color: 'var(--ink-2)' }}>{m(st.costs)}</span>
+                  <span className="r" style={{ fontWeight: 700, color: st.margin < 0 ? 'var(--red)' : st.margin > 0 ? 'var(--green)' : undefined }}>
+                    {m(st.margin)}{st.marginRate !== null && <span className="small" style={{ fontWeight: 500 }}> {pct(st.marginRate)}</span>}
+                  </span>
+                  <span>
+                    {st.budgetUsed !== null ? (
+                      <span className="progress" title={`${pct(st.budgetUsed)} of ${m(st.budget)} invoiced`}>
+                        <span className="progress-bar"><div style={{ width: `${Math.min(100, st.budgetUsed)}%`, background: st.budgetUsed > 100 ? 'var(--amber)' : undefined }} /></span>
+                        <span className="small" style={{ fontWeight: 600 }}>{Math.round(st.budgetUsed)}%</span>
+                      </span>
+                    ) : <span className="small">—</span>}
+                  </span>
+                  <span className="r" style={{ color: 'var(--ink-2)' }}>{st.minutes ? fmtDuration(st.minutes) : '—'}</span>
+                  <span className="r" style={{ fontWeight: 600 }}>{st.perHour !== null ? m(st.perHour) : '—'}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="card" style={{ gap: '0.375rem' }}>
         <div className="head">

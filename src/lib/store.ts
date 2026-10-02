@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AppData, Client, Entry, Investment, Note, Recurring, Task } from '../types';
+import type { AppData, CheckItem, Client, Entry, Investment, Note, Priority, Recurring, Task, TimeEntry } from '../types';
 import { isHex, nextColor } from './colors';
 import { COLUMNS, LOCALE, NOTE_KINDS, PROJECT_STATUSES, catLabel } from './constants';
 import { isoDate, monthsAgo, uid } from './format';
@@ -65,7 +65,7 @@ export const localRepository: Repository = {
 
 export function emptyData(): AppData {
   return {
-    profile: { name: '', email: '', company: '', currency: 'EUR', targetPct: 30, alertPct: 12, avatar: '', investIsin: '', investMic: '', investName: '' },
+    profile: { name: '', email: '', company: '', currency: 'EUR', targetPct: 30, alertPct: 12, avatar: '', investIsin: '', investMic: '', investName: '', revenueGoal: 0 },
     clients: [],
     projects: [],
     tasks: [],
@@ -73,6 +73,7 @@ export function emptyData(): AppData {
     recurring: [],
     notes: [],
     investments: [],
+    timeEntries: [],
   };
 }
 
@@ -96,6 +97,14 @@ export const topPosition = (projects: { position: number }[]) => projects.reduce
 const TYPES = ['revenue', 'direct', 'opex'];
 const COLS = COLUMNS.map((c) => c.key as string);
 const idOf = (v: unknown) => (typeof v === 'string' && UUID.test(v) ? v : uid());
+const PRIORITIES: Priority[] = ['none', 'low', 'medium', 'high'];
+const isoTime = (v: unknown) => (typeof v === 'string' && v && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : '');
+/** Checklist items, rebuilt with a fixed key order (the sync compares rows as JSON). */
+const checklist = (v: unknown): CheckItem[] =>
+  (Array.isArray(v) ? v : [])
+    .filter((x) => x && typeof x === 'object' && text((x as CheckItem).text).trim())
+    .slice(0, 100)
+    .map((x) => ({ id: text((x as CheckItem).id) || uid(), text: text((x as CheckItem).text).trim(), done: (x as CheckItem).done === true }));
 
 /**
  * Make any saved or imported data safe to use and to store: fills fields added since, drops
@@ -139,6 +148,7 @@ export function normalize(d: Partial<AppData>): AppData {
           context: text(x.brief?.context), goal: text(x.brief?.goal),
           deliverables: text(x.brief?.deliverables), out: text(x.brief?.out),
         },
+        budget: amount(x.budget),
       };
     })
     .sort((a, b) => a.position - b.position);
@@ -152,6 +162,7 @@ export function normalize(d: Partial<AppData>): AppData {
       investIsin: /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(text(p.investIsin)) ? text(p.investIsin) : '',
       investMic: /^[A-Z]{4}$/.test(text(p.investMic)) ? text(p.investMic) : '',
       investName: text(p.investName),
+      revenueGoal: amount(p.revenueGoal),
     },
     clients,
     projects,
@@ -161,6 +172,8 @@ export function normalize(d: Partial<AppData>): AppData {
         clientId: legacy ? '' : cid(t.clientId), projectId: pid(t.projectId), due: day(t.due), note: text(t.note),
         position: Number.isFinite(Number(t.position)) && t.position !== null ? Number(t.position) : i,
         doneAt: t.col === 'done' && typeof t.doneAt === 'string' && !Number.isNaN(Date.parse(t.doneAt)) ? t.doneAt : '',
+        priority: PRIORITIES.includes(t.priority) ? t.priority : 'none',
+        checklist: checklist(t.checklist),
       }))
       .sort((a, b) => a.position - b.position),
     entries: (d.entries ?? [])
@@ -168,6 +181,9 @@ export function normalize(d: Partial<AppData>): AppData {
       .map((e): Entry => ({
         id: idOf(e.id), date: e.date, label: text(e.label) || catLabel(text(e.category)), type: e.type, category: text(e.category),
         amount: amount(e.amount), projectId: pid(e.projectId),
+        // Older saves have no payment status: they were paid. Only revenue can wait for payment.
+        paid: e.type !== 'revenue' || e.paid !== false,
+        due: e.type === 'revenue' ? day(e.due) : '',
       })),
     recurring: (d.recurring ?? [])
       .filter((r) => isDay(r.start) && TYPES.includes(r.type))
@@ -191,7 +207,20 @@ export function normalize(d: Partial<AppData>): AppData {
         price: Math.max(0, Number(x.price) || 0), close: Math.max(0, Number(x.close) || 0),
       }))
       .sort((a, b) => a.date.localeCompare(b.date)),
+    timeEntries: normTime(d.timeEntries ?? [], pid, new Set((d.tasks ?? []).map((t) => t.id))),
   };
+}
+
+function normTime(list: TimeEntry[], pid: (v: unknown) => string, taskIds: Set<string>): TimeEntry[] {
+  return list
+    .filter((x) => isDay(x.date))
+    .map((x): TimeEntry => ({
+      id: idOf(x.id), projectId: pid(x.projectId),
+      taskId: typeof x.taskId === 'string' && taskIds.has(x.taskId) ? x.taskId : '',
+      date: x.date, minutes: Math.max(0, Math.min(100_000, Math.round(Number(x.minutes) || 0))),
+      note: text(x.note), startedAt: isoTime(x.startedAt),
+    }))
+    .sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
 }
 
 export function demoData(profile: AppData['profile']): AppData {
@@ -211,9 +240,17 @@ export function demoData(profile: AppData['profile']): AppData {
   ];
   rows.forEach(([type, category, label, projectId, vals], ri) =>
     vals.forEach((amount, i) => {
-      if (amount) entries.push({ id: uid(), date: m(5 - i, 3 + ri * 2), label, type, category, amount, projectId });
+      if (amount) entries.push({ id: uid(), date: m(5 - i, 3 + ri * 2), label, type, category, amount, projectId, paid: true, due: '' });
     }),
   );
+  // This month's invoice is still waiting, and one from last month is late.
+  const lastInvoice = entries.filter((e) => e.type === 'revenue').at(-1);
+  if (lastInvoice) Object.assign(lastInvoice, { paid: false, due: isoDate(new Date(Date.now() + 12 * 86_400_000)) });
+  entries.push({ id: uid(), date: m(1, 20), label: 'Booking app, milestone 2', type: 'revenue', category: 'Services', amount: 2400, projectId: p3, paid: false, due: m(1, 30) > isoDate() ? isoDate(new Date(Date.now() - 4 * 86_400_000)) : m(1, 30) });
+  const daysAgo = (n: number) => isoDate(new Date(Date.now() - n * 86_400_000));
+  const ck = (items: [string, boolean][]) => items.map(([text, done]) => ({ id: uid(), text, done }));
+  const t1 = uid();
+  const t3 = uid();
   const start = m(5, 1);
   return {
     profile,
@@ -224,18 +261,24 @@ export function demoData(profile: AppData['profile']): AppData {
       { id: c4, name: 'Bike & Co', color: '#2fa565' },
     ],
     projects: [
-      { id: p1, name: 'E-commerce site redesign', clientId: c1, start: m(2, 4), deadline: m(-1, 15), status: 'In progress' , position: 0, brief: { context: 'Online home decor shop, 800 orders a month.', goal: 'Double the mobile conversion rate.', deliverables: 'Mockups, build, payments, training.', out: 'Product photos and SEO product copy.' } },
-      { id: p2, name: 'Visual identity', clientId: c2, start: m(0, 10), deadline: m(-2, 2), status: 'Not started' , position: 1 , brief: { context: '', goal: '', deliverables: '', out: '' } },
-      { id: p3, name: 'Booking app', clientId: c3, start: m(4, 1), deadline: m(0, 1), status: 'In progress' , position: 2 , brief: { context: '', goal: '', deliverables: '', out: '' } },
-      { id: p4, name: 'SEO audit', clientId: c4, start: m(3, 1), deadline: m(2, 12), status: 'Done' , position: 3 , brief: { context: '', goal: '', deliverables: '', out: '' } },
+      { id: p1, name: 'E-commerce site redesign', clientId: c1, start: m(2, 4), deadline: m(-1, 15), status: 'In progress' , position: 0, brief: { context: 'Online home decor shop, 800 orders a month.', goal: 'Double the mobile conversion rate.', deliverables: 'Mockups, build, payments, training.', out: 'Product photos and SEO product copy.' }, budget: 48000 },
+      { id: p2, name: 'Visual identity', clientId: c2, start: m(0, 10), deadline: m(-2, 2), status: 'Not started' , position: 1 , brief: { context: '', goal: '', deliverables: '', out: '' }, budget: 6500 },
+      { id: p3, name: 'Booking app', clientId: c3, start: m(4, 1), deadline: m(0, 1), status: 'In progress' , position: 2 , brief: { context: '', goal: '', deliverables: '', out: '' }, budget: 12000 },
+      { id: p4, name: 'SEO audit', clientId: c4, start: m(3, 1), deadline: m(2, 12), status: 'Done' , position: 3 , brief: { context: '', goal: '', deliverables: '', out: '' }, budget: 0 },
     ],
     tasks: [
-      { id: uid(), title: 'Send quote v2', col: 'todo', clientId: '', projectId: p2, due: isoDate(), note: '' , position: 0, doneAt: '' },
-      { id: uid(), title: "Prepare this month's invoice", col: 'todo', clientId: '', projectId: '', due: '', note: '' , position: 1, doneAt: '' },
-      { id: uid(), title: 'Product page mockups', col: 'ongoing', clientId: '', projectId: p1, due: '', note: '' , position: 2, doneAt: '' },
-      { id: uid(), title: 'Payment integration', col: 'ongoing', clientId: '', projectId: p3, due: '', note: '' , position: 3, doneAt: '' },
-      { id: uid(), title: 'Waiting for hosting access', col: 'blocked', clientId: '', projectId: p1, due: '', note: 'Follow up with the client' , position: 4, doneAt: '' },
-      { id: uid(), title: 'Final SEO report', col: 'done', clientId: '', projectId: p4, due: '', note: '' , position: 5, doneAt: new Date().toISOString() },
+      { id: uid(), title: 'Send quote v2', col: 'todo', clientId: '', projectId: p2, due: isoDate(), note: '', position: 0, doneAt: '', priority: 'high', checklist: ck([['Update the scope', true], ['Add the logo options', false], ['Send by email', false]]) },
+      { id: uid(), title: "Prepare this month's invoice", col: 'todo', clientId: '', projectId: '', due: daysAgo(-3), note: '', position: 1, doneAt: '', priority: 'medium', checklist: [] },
+      { id: uid(), title: 'Write the launch checklist', col: 'todo', clientId: '', projectId: p1, due: daysAgo(2), note: '', position: 2, doneAt: '', priority: 'low', checklist: [] },
+      { id: t1, title: 'Product page mockups', col: 'ongoing', clientId: '', projectId: p1, due: daysAgo(-5), note: '', position: 3, doneAt: '', priority: 'high', checklist: ck([['Desktop layout', true], ['Mobile layout', true], ['Size picker states', false], ['Review with the client', false]]) },
+      { id: t3, title: 'Payment integration', col: 'ongoing', clientId: '', projectId: p3, due: '', note: '', position: 4, doneAt: '', priority: 'medium', checklist: ck([['Stripe account', true], ['Checkout flow', false]]) },
+      { id: uid(), title: 'Waiting for hosting access', col: 'blocked', clientId: '', projectId: p1, due: '', note: 'Follow up with the client', position: 5, doneAt: '', priority: 'none', checklist: [] },
+      { id: uid(), title: 'Final SEO report', col: 'done', clientId: '', projectId: p4, due: '', note: '', position: 6, doneAt: new Date().toISOString(), priority: 'none', checklist: [] },
+    ],
+    timeEntries: [
+      ...[1, 2, 3, 6, 8, 9, 10, 13, 15, 16].map((n, i) => ({ id: uid(), projectId: p1, taskId: i % 2 ? t1 : '', date: daysAgo(n), minutes: [150, 95, 210, 120, 180, 75, 240, 60, 135, 200][i], note: i % 2 ? '' : 'Build', startedAt: '' })),
+      ...[0, 2, 4, 7, 11].map((n, i) => ({ id: uid(), projectId: p3, taskId: t3, date: daysAgo(n), minutes: [45, 120, 90, 160, 110][i], note: '', startedAt: '' })),
+      { id: uid(), projectId: p2, taskId: '', date: daysAgo(1), minutes: 50, note: 'Kick-off call', startedAt: '' },
     ],
     entries,
     investments: [],
@@ -278,6 +321,7 @@ export function pruneParents(d: AppData, stale: Stale): AppData {
     entries: d.entries.map(unP),
     recurring: d.recurring.map(unP),
     notes: d.notes.filter((n) => !p.has(n.projectId)),
+    timeEntries: d.timeEntries.map(unP),
   };
 }
 
@@ -285,6 +329,7 @@ export function useAppData(repo: Repository) {
   const [data, setData] = useState<AppData | null>(null);
   const [status, setStatus] = useState<SyncStatus>('loading');
   const [rejection, setRejection] = useState('');
+  const [loadError, setLoadError] = useState('');
   const [attempt, setAttempt] = useState(0);
   const loaded = useRef(false);
   // Set when the state comes from the repository (load or refresh), so it is not written straight back.
@@ -361,7 +406,11 @@ export function useAppData(repo: Repository) {
         loaded.current = true;
       },
       // Never fall back to empty data here: saving it would overwrite the real data.
-      () => alive && setStatus('load-error'),
+      (e: unknown) => {
+        if (!alive) return;
+        setLoadError(e instanceof Error ? e.message : '');
+        setStatus('load-error');
+      },
     );
     const unsubscribe = repo.subscribe?.(
       (d) => {
@@ -420,7 +469,7 @@ export function useAppData(repo: Repository) {
   const update = useCallback((fn: (d: AppData) => AppData) => setData((d) => (d ? fn(d) : d)), []);
   const retryLoad = useCallback(() => setAttempt((n) => n + 1), []);
   const hasUnsaved = useCallback(() => !!pending.current || inFlight.current, []);
-  return { data, update, status, rejection, retryLoad, hasUnsaved };
+  return { data, update, status, rejection, loadError, retryLoad, hasUnsaved };
 }
 
 /** Journal order: newest day first; within a day, the note written last first. */

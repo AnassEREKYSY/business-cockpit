@@ -1,4 +1,4 @@
-import type { EntryType, NoteKind, ProjectStatus, TaskColumn } from '../types';
+import type { EntryType, NoteKind, Priority, ProjectStatus, TaskColumn } from '../types';
 
 /*
  * Stored values (project statuses, categories, note kinds) keep the keys they were created with,
@@ -94,3 +94,11 @@ export const BRIEF_FIELDS: { key: 'context' | 'goal' | 'deliverables' | 'out'; l
   { key: 'deliverables', label: 'Deliverables', placeholder: 'Dashboard, CSV import, weekly report…' },
   { key: 'out', label: 'Out of scope', placeholder: 'What is not included (billed separately)' },
 ];
+
+export const PRIORITIES: { key: Priority; label: string; color: string }[] = [
+  { key: 'none', label: 'No priority', color: 'var(--faint)' },
+  { key: 'low', label: 'Low', color: '#3b82f6' },
+  { key: 'medium', label: 'Medium', color: '#f59e0b' },
+  { key: 'high', label: 'High', color: '#ef4444' },
+];
+export const priorityMeta = (p: Priority) => PRIORITIES.find((x) => x.key === p) ?? PRIORITIES[0];

@@ -1,13 +1,17 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
-import { useConfirm } from '../components/Confirm';
 import { DatePicker } from '../components/Calendar';
 import { ClientChip } from '../components/pickers';
 import { Select } from '../components/Select';
-import { IconPencil, Seg } from '../components/ui';
+import { IconPencil, IconPlay, IconStop, Seg } from '../components/ui';
+import { useToast } from '../components/Toast';
+import { allTxns } from '../lib/finance';
+import { projectStats } from '../lib/stats';
+import { entryMinutes, fmtClock, fmtDuration, parseDuration, runningEntry, startTimer, stopTimers, sumMinutes, useNow, weekStart } from '../lib/time';
+import { putBack, removeRow } from '../lib/undo';
 import { BRIEF_FIELDS, NOTE_KINDS, PROJECT_STATUSES, STATUS_META, statusLabel } from '../lib/constants';
-import { fmtDate, isoDate, uid } from '../lib/format';
+import { fmtDate, isoDate, money, pct, uid } from '../lib/format';
 import { isDay, sortNotes } from '../lib/store';
-import type { AppData, Note, NoteKind, Project } from '../types';
+import type { AppData, Note, NoteKind, Project, TimeEntry } from '../types';
 import { newProject, ProjectModal } from './OverviewPage';
 
 type Update = (fn: (d: AppData) => AppData) => void;
@@ -38,6 +42,8 @@ function ProjectList({ data, update, openProject }: Props) {
   const clientOf = (id: string) => data.clients.find((c) => c.id === id);
   const list = data.projects.filter((p) => filter === 'all' || (filter === 'active' ? p.status !== 'Done' : p.status === 'Done'));
   const today = isoDate();
+  const txns = allTxns(data);
+  const m = (n: number) => money(n, data.profile.currency);
 
   return (
     <section className="section">
@@ -61,6 +67,7 @@ function ProjectList({ data, update, openProject }: Props) {
           const briefFilled = BRIEF_FIELDS.filter((f) => p.brief[f.key].trim()).length;
           const meta = STATUS_META[p.status];
           const late = p.deadline && p.deadline < today && p.status !== 'Done';
+          const st = projectStats(data, p.id, txns);
           return (
             <button className="pcard" key={p.id} onClick={() => openProject(p.id)} style={{ borderTopColor: client?.color ?? 'var(--line)' }}>
               <div className="row" style={{ justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'nowrap' }}>
@@ -76,6 +83,19 @@ function ProjectList({ data, update, openProject }: Props) {
                   <span className="progress-bar"><div style={{ width: `${(done / tasks.length) * 100}%` }} /></span>
                   <span className="small" style={{ fontWeight: 600 }}>{done}/{tasks.length}</span>
                 </span>
+              )}
+              {(st.revenue > 0 || st.budget > 0 || st.minutes > 0) && (
+                <div className="pcard-money">
+                  <span>
+                    <b>{m(st.revenue)}</b>
+                    {st.budget > 0 && <span className="small"> / {m(st.budget)}</span>}
+                  </span>
+                  <span className="small">
+                    {st.marginRate !== null ? `${pct(st.marginRate)} margin` : ''}
+                    {st.marginRate !== null && st.minutes ? ' · ' : ''}
+                    {st.minutes ? fmtDuration(st.minutes) : ''}
+                  </span>
+                </div>
               )}
               <div className="pcard-foot">
                 {last ? (
@@ -106,12 +126,18 @@ function ProjectList({ data, update, openProject }: Props) {
 
 function ProjectView({ data, update, project: p, back }: Props & { project: Project }) {
   const [editing, setEditing] = useState(false);
+  const toast = useToast();
   const client = data.clients.find((c) => c.id === p.clientId);
   const tasks = data.tasks.filter((t) => t.projectId === p.id);
   const done = tasks.filter((t) => t.col === 'done').length;
   const meta = STATUS_META[p.status];
   const today = isoDate();
   const late = p.deadline && p.deadline < today && p.status !== 'Done';
+  const running = runningEntry(data);
+  const timing = running?.projectId === p.id;
+  const now = useNow(timing);
+  const st = projectStats(data, p.id, undefined, now);
+  const m = (n: number) => money(n, data.profile.currency);
 
   const cycle = () =>
     update((d) => ({
@@ -120,6 +146,16 @@ function ProjectView({ data, update, project: p, back }: Props & { project: Proj
         x.id === p.id ? { ...x, status: PROJECT_STATUSES[(PROJECT_STATUSES.indexOf(x.status) + 1) % PROJECT_STATUSES.length] } : x,
       ),
     }));
+  const toggleTimer = () => {
+    if (timing) {
+      const { added } = stopTimers(data);
+      update((d) => stopTimers(d).data);
+      toast(added ? <>{fmtDuration(added)} logged on <b>{p.name}</b></> : 'Timer stopped (under a minute, not logged)');
+    } else {
+      update((d) => startTimer(d, { projectId: p.id }));
+      toast(<>Timer started on <b>{p.name}</b></>);
+    }
+  };
 
   return (
     <section className="section loose">
@@ -139,9 +175,44 @@ function ProjectView({ data, update, project: p, back }: Props & { project: Proj
             </span>
           </div>
         </div>
-        <div className="phead-progress">
-          <span className="small">Tasks {done}/{tasks.length}</span>
-          <span className="progress-bar"><div style={{ width: tasks.length ? `${(done / tasks.length) * 100}%` : 0 }} /></span>
+        <div className="phead-side">
+          <div className="phead-progress">
+            <span className="small">Tasks {done}/{tasks.length}</span>
+            <span className="progress-bar"><div style={{ width: tasks.length ? `${(done / tasks.length) * 100}%` : 0 }} /></span>
+          </div>
+          <button className={'btn ' + (timing ? 'danger' : 'outline')} onClick={toggleTimer}>
+            {timing && running ? <><IconStop size={11} /> {fmtClock(entryMinutes(running, now) * 60_000)}</> : <><IconPlay size={11} /> Start timer</>}
+          </button>
+        </div>
+      </div>
+
+      <div className="kpis pstats">
+        <div className="kpi">
+          <div className="kpi-k">Budget</div>
+          <div className="kpi-v">{st.budget ? m(st.budget) : '—'}</div>
+          {st.budgetUsed !== null ? (
+            <>
+              <span className="goal-bar"><span style={{ width: `${Math.min(100, st.budgetUsed)}%`, background: st.budgetUsed > 100 ? 'var(--amber)' : undefined }} /></span>
+              <div className="kpi-s">{pct(st.budgetUsed)} invoiced{st.budget > st.revenue ? ` · ${m(st.budget - st.revenue)} left` : ''}</div>
+            </>
+          ) : (
+            <button className="link-btn small" style={{ alignSelf: 'flex-start' }} onClick={() => setEditing(true)}>Set a budget</button>
+          )}
+        </div>
+        <div className="kpi">
+          <div className="kpi-k">Revenue</div>
+          <div className="kpi-v">{m(st.revenue)}</div>
+          <div className="kpi-s" style={{ color: st.unpaid ? 'var(--amber)' : undefined }}>{st.unpaid ? `${m(st.unpaid)} not paid yet` : 'All paid'}</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-k">Margin</div>
+          <div className="kpi-v" style={{ color: st.margin < 0 ? 'var(--red)' : undefined }}>{m(st.margin)}</div>
+          <div className="kpi-s">{st.marginRate !== null ? `${pct(st.marginRate)} after ${m(st.costs)} of costs` : 'No revenue yet'}</div>
+        </div>
+        <div className="kpi">
+          <div className="kpi-k">Time</div>
+          <div className="kpi-v">{fmtDuration(st.minutes)}</div>
+          <div className="kpi-s">{st.perHour !== null ? `${m(st.perHour)} earned per hour` : 'Start the timer to track it'}</div>
         </div>
       </div>
 
@@ -150,8 +221,84 @@ function ProjectView({ data, update, project: p, back }: Props & { project: Proj
         <Journal project={p} notes={data.notes} update={update} />
       </div>
 
-      {editing && <ProjectModal project={p} data={data} update={update} onClose={() => setEditing(false)} />}
+      <TimeLog data={data} project={p} update={update} now={now} />
+
+      {editing && <ProjectModal project={p} data={data} update={update} onClose={() => setEditing(false)} onDeleted={back} />}
     </section>
+  );
+}
+
+/* ---------------- Time log ---------------- */
+
+function TimeLog({ data, project, update, now }: { data: AppData; project: Project; update: Update; now: number }) {
+  const [date, setDate] = useState(isoDate());
+  const [dur, setDur] = useState('');
+  const [taskId, setTaskId] = useState('');
+  const [note, setNote] = useState('');
+  const [all, setAll] = useState(false);
+  const toast = useToast();
+  const minutes = parseDuration(dur);
+  const entries = data.timeEntries
+    .filter((x) => x.projectId === project.id)
+    .sort((a, b) => b.date.localeCompare(a.date) || (b.startedAt ? 1 : 0) - (a.startedAt ? 1 : 0));
+  const total = sumMinutes(entries, now);
+  const week = sumMinutes(entries.filter((x) => x.date >= weekStart()), now);
+  const tasks = data.tasks.filter((t) => t.projectId === project.id);
+  const taskName = (id: string) => data.tasks.find((t) => t.id === id)?.title ?? '';
+  const taskOptions = [{ value: '', label: 'Whole project' }, ...tasks.map((t) => ({ value: t.id, label: t.title }))];
+
+  const add = () => {
+    if (!minutes || !isDay(date)) return;
+    const entry: TimeEntry = { id: uid(), projectId: project.id, taskId, date, minutes, note: note.trim(), startedAt: '' };
+    update((d) => ({ ...d, timeEntries: [entry, ...d.timeEntries] }));
+    toast(<>{fmtDuration(minutes)} logged on <b>{project.name}</b></>, {
+      undo: () => update((d) => ({ ...d, timeEntries: d.timeEntries.filter((x) => x.id !== entry.id) })),
+    });
+    setDur('');
+    setNote('');
+  };
+  const remove = (e: TimeEntry) => {
+    const { restore } = removeRow(data, 'timeEntries', e.id);
+    update((d) => removeRow(d, 'timeEntries', e.id).data);
+    toast(<>{fmtDuration(entryMinutes(e))} removed</>, { undo: () => update(restore) });
+  };
+  const shown = all ? entries : entries.slice(0, 8);
+
+  return (
+    <div className="card" style={{ gap: '0.875rem' }}>
+      <div className="head">
+        <div>
+          <div className="card-title">Time log <span className="small" style={{ fontWeight: 500 }}>{entries.length}</span></div>
+          <div className="small">{fmtDuration(total)} in total · {fmtDuration(week)} this week. Log time by hand, or use the timer.</div>
+        </div>
+      </div>
+      <form className="time-form" onSubmit={(e) => { e.preventDefault(); add(); }}>
+        <div className="note-ctl"><DatePicker value={date} onChange={setDate} clearable={false} size="sm" ariaLabel="Date" /></div>
+        <input className="input time-dur" value={dur} onChange={(e) => setDur(e.target.value)} placeholder="1h30" aria-label="Duration" />
+        <div className="time-task"><Select value={taskId} onChange={setTaskId} options={taskOptions} size="sm" ariaLabel="Task" /></div>
+        <input className="input time-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="What did you work on? (optional)" aria-label="Note" />
+        <button className="btn sm" type="submit" disabled={!minutes}>Log time</button>
+      </form>
+      {dur.trim() && !minutes && <div className="small" style={{ color: 'var(--red)' }}>Write a duration like 1h30, 45m, 1:15 or 2.5</div>}
+      <div className="time-list">
+        {shown.map((e) => (
+          <div className={'time-row' + (e.startedAt ? ' is-running' : '')} key={e.id}>
+            <span className="time-date">{fmtDate(e.date, e.date.slice(0, 4) === String(new Date().getFullYear()))}</span>
+            <span className="ellipsis time-what">
+              {e.startedAt && <span className="live-dot" />}
+              {taskName(e.taskId) || e.note || <span style={{ color: 'var(--muted)' }}>Project work</span>}
+              {taskName(e.taskId) && e.note ? <span className="small"> · {e.note}</span> : null}
+            </span>
+            <b className="time-dur-v">{e.startedAt ? fmtClock(entryMinutes(e, now) * 60_000) : fmtDuration(e.minutes)}</b>
+            <button className="x" onClick={() => remove(e)} aria-label="Remove this time" disabled={!!e.startedAt}>×</button>
+          </div>
+        ))}
+        {entries.length === 0 && <div className="empty">No time logged yet. Start the timer at the top, or log a session above.</div>}
+        {entries.length > 8 && (
+          <button className="archived-link" onClick={() => setAll(!all)}>{all ? 'Show less' : `Show all ${entries.length}`}</button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -228,7 +375,7 @@ function Journal({ project, notes, update }: { project: Project; notes: Note[]; 
   const [date, setDate] = useState(isoDate());
   const [body, setBody] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
-  const confirm = useConfirm();
+  const toast = useToast();
 
   const list = sortNotes(notes.filter((n) => n.projectId === project.id));
 
@@ -239,9 +386,9 @@ function Journal({ project, notes, update }: { project: Project; notes: Note[]; 
     setBody('');
     setKind('note');
   };
-  const remove = async (n: Note) => {
-    const ok = await confirm({ title: 'Delete this note?', message: n.body.slice(0, 160), confirmLabel: 'Delete', danger: true });
-    if (ok) update((d) => ({ ...d, notes: d.notes.filter((x) => x.id !== n.id) }));
+  const remove = (n: Note) => {
+    update((d) => removeRow(d, 'notes', n.id).data);
+    toast('Note deleted', { undo: () => update((d) => putBack(d, 'notes', [n])) });
   };
   const save = (n: Note) => update((d) => ({ ...d, notes: d.notes.map((x) => (x.id === n.id ? n : x)) }));
 
@@ -286,7 +433,7 @@ function Journal({ project, notes, update }: { project: Project; notes: Note[]; 
                 <span className="note-kind" style={{ background: kindMeta(n.kind).bg, color: kindMeta(n.kind).color }}>{kindMeta(n.kind).label}</span>
                 <span className="note-actions">
                   <button className="icon-btn" onClick={() => setEditingId(n.id)} title="Edit" aria-label="Edit note"><IconPencil /></button>
-                  <button className="icon-btn danger" onClick={() => void remove(n)} title="Delete" aria-label="Delete note"><span style={{ fontSize: '1.0625rem', lineHeight: 1 }}>×</span></button>
+                  <button className="icon-btn danger" onClick={() => remove(n)} title="Delete" aria-label="Delete note"><span style={{ fontSize: '1.0625rem', lineHeight: 1 }}>×</span></button>
                 </span>
               </div>
               <div className="note-body">{linkify(n.body)}</div>

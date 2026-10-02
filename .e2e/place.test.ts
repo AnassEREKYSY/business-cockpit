@@ -2,7 +2,7 @@
 import { emptyData, isArchived, placeTask, withCol } from '../src/lib/store';
 import type { AppData, Task } from '../src/types';
 
-const mk = (id: string, col: Task['col'], position: number): Task => ({ id, title: id, col, clientId: '', projectId: '', due: '', note: '', position, doneAt: '' });
+const mk = (id: string, col: Task['col'], position: number): Task => ({ id, title: id, col, clientId: '', projectId: '', due: '', note: '', position, doneAt: '', priority: 'none', checklist: [] });
 const order = (d: AppData, col: Task['col']) => d.tasks.filter((t) => t.col === col).sort((a, b) => a.position - b.position).map((t) => t.id).join('');
 let fail = 0;
 const eq = (name: string, got: string, want: string) => {

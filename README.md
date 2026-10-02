@@ -4,9 +4,12 @@ Your business cockpit for freelancers and small studios: projects, a daily task 
 
 ![Cockpit, Finances page](docs/finances.png)
 
-- **Overview**: your active projects and a task board in 4 columns (To do, In progress, Blocked, Done). Drag cards to move or reorder them. Done tasks disappear from the board after a week (they stay saved).
-- **Projects**: one page per project with a brief (context, goal, deliverables, out of scope) and a dated journal (calls, decisions, notes).
-- **Finances**: revenue, direct costs, overheads and margin for one month, 3 months, 12 months or all time. Subscriptions, retainers and contractors are entered once and counted every month automatically.
+- **Overview**: a dashboard (tasks due today, revenue this month and your goal, money still to collect, hours tracked this week, the next deadlines), your active projects and a task board in 4 columns (To do, In progress, Blocked, Done). Drag cards to move or reorder them; search and filter the board by client, project, priority or due date. Done tasks disappear from the board after a week (they stay saved).
+- **Tasks**: priority (low, medium, high), a checklist inside each task, due dates highlighted when they are today or late, and a timer you start from the card.
+- **Projects**: one page per project with a brief (context, goal, deliverables, out of scope), a dated journal (calls, decisions, notes), its budget, revenue, costs, margin, tracked time and what you earn per hour.
+- **Time tracking**: start and stop a timer on a task or a project (it keeps running if you close the tab), or log time by hand ("1h30", "45m").
+- **Finances**: revenue, direct costs, overheads and margin for one month, 3 months, 12 months or all time, unpaid invoices with their due dates, and profitability per project. Subscriptions, retainers and contractors are entered once and counted every month automatically.
+- **Fast to use**: Ctrl + K (⌘ K on a Mac) searches everything and runs actions; N creates a task, P a project, / searches the board, G then O / P / F / D switches pages. Deletes show a notification with Undo.
 - **Light and dark themes**: a clean black and white look. Follows your device by default; switch Light / Dark / System at the bottom of the sidebar (the sun / moon button on phones).
 - **Data & profile**: your name, photo and currency, your clients and their colours, transactions, recurring items, and a backup file you can download.
 
@@ -161,6 +164,18 @@ That one change was refused (for example, the item was deleted or changed on ano
 
 **After some days without using it: "Offline" or "Couldn't load your data", and no login email.**
 Free Supabase projects are paused after about a week without activity (Supabase emails you before). Open your project on [supabase.com](https://supabase.com) and click the button to restore or resume it, wait a couple of minutes, then reload your Cockpit. Using Cockpit regularly keeps the project awake.
+
+---
+
+## Updating your Cockpit
+
+When a new version needs new database tables or columns, it ships a new file in `supabase/migrations/`. Run it **before** pushing (or merging) the new code:
+
+1. In Supabase, open **SQL Editor → New query**.
+2. Paste the new migration file (for this version: `supabase/migrations/20261002120000_features.sql`) and click **Run**. It only adds things: your data is not touched, and running it twice is harmless.
+3. Push the code. Vercel redeploys in about a minute.
+
+If you push first, the app shows a "One database update to run" screen with the same instructions until the migration is done.
 
 ---
 

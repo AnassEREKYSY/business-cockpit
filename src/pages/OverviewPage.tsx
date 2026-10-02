@@ -1,12 +1,18 @@
-import { useEffect, useLayoutEffect, useRef, useState, type DragEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import { useConfirm } from '../components/Confirm';
 import { DatePicker } from '../components/Calendar';
-import { ClientChip, ClientDot, ClientSelect, ProjectSelect } from '../components/pickers';
+import { ClientChip, ClientDot, ClientSelect } from '../components/pickers';
 import { Select } from '../components/Select';
-import { Field, IconPencil, Modal, Seg } from '../components/ui';
-import { COLUMNS, PROJECT_STATUSES, STATUS_META, statusLabel } from '../lib/constants';
-import { fmtDate, isoDate, uid } from '../lib/format';
-import { ARCHIVE_AFTER_DAYS, isArchived, isDay, nextPosition, placeTask, topPosition, withCol } from '../lib/store';
+import { TaskModal, newTask } from '../components/TaskModal';
+import { useToast } from '../components/Toast';
+import { Field, IconArrow, IconChecks, IconClock, IconFlag, IconPencil, IconPlay, IconSearch, IconStop, Modal, Seg } from '../components/ui';
+import { COLUMNS, PROJECT_STATUSES, STATUS_META, priorityMeta, statusLabel } from '../lib/constants';
+import { allTxns, parseAmount, totals } from '../lib/finance';
+import { fmtDate, fmtMonth, isoDate, money, monthKey, pct, shiftMonth, uid } from '../lib/format';
+import { isOverdue, unpaidInvoices } from '../lib/stats';
+import { ARCHIVE_AFTER_DAYS, isArchived, isDay, nextPosition, placeTask, topPosition } from '../lib/store';
+import { entryMinutes, fmtClock, fmtDuration, runningEntry, startTimer, stopTimers, sumMinutes, useNow, weekStart } from '../lib/time';
+import { removeProject, removeRow } from '../lib/undo';
 import type { AppData, Project, Task, TaskColumn } from '../types';
 
 type Update = (fn: (d: AppData) => AppData) => void;
@@ -20,17 +26,223 @@ function changedFields<T extends object>(original: T, edited: T): Partial<T> {
 
 const emptyProject = (): Omit<Project, 'id' | 'position'> => ({
   name: '', clientId: '', start: isoDate(), deadline: '', status: 'Not started',
-  brief: { context: '', goal: '', deliverables: '', out: '' },
+  brief: { context: '', goal: '', deliverables: '', out: '' }, budget: 0,
 });
 const STATUS_OPTIONS = PROJECT_STATUSES.map((s) => ({ value: s, label: statusLabel(s), color: STATUS_META[s].color }));
-const COLUMN_OPTIONS = COLUMNS.map((c) => ({ value: c.key, label: c.label, color: c.dot }));
 
-export default function OverviewPage({ data, update, openProject }: { data: AppData; update: Update; openProject: (id: string) => void }) {
+const DAY_MS = 86_400_000;
+const addDays = (iso: string, n: number) => isoDate(new Date(new Date(iso + 'T12:00:00').getTime() + n * DAY_MS));
+const daysBetween = (a: string, b: string) => Math.round((Date.parse(b + 'T12:00:00') - Date.parse(a + 'T12:00:00')) / DAY_MS);
+
+/** "Today", "Tomorrow", "3d overdue", "Fri", "12 Oct". */
+export function dueLabel(due: string, today = isoDate()): string {
+  const n = daysBetween(today, due);
+  if (n === 0) return 'Today';
+  if (n === 1) return 'Tomorrow';
+  if (n < 0) return n === -1 ? 'Yesterday' : `${-n}d overdue`;
+  if (n < 7) return new Date(due + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'short' });
+  return fmtDate(due, true);
+}
+
+export type BoardFilter = {
+  q: string;
+  clientId: string;
+  projectId: string;
+  due: 'all' | 'overdue' | 'today' | 'week';
+  priority: 'any' | 'high' | 'medium';
+};
+const NO_FILTER: BoardFilter = { q: '', clientId: '', projectId: '', due: 'all', priority: 'any' };
+
+export default function OverviewPage({ data, update, openProject, goFinances }: {
+  data: AppData;
+  update: Update;
+  openProject: (id: string) => void;
+  goFinances: () => void;
+}) {
+  const [filter, setFilter] = useState<BoardFilter>(NO_FILTER);
+  const [editing, setEditing] = useState<Task | null>(null);
+  const boardRef = useRef<HTMLElement>(null);
+  const showOnBoard = (patch: Partial<BoardFilter>) => {
+    setFilter({ ...NO_FILTER, ...patch });
+    boardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
   return (
     <>
+      <Dashboard data={data} openTask={setEditing} openProject={openProject} showOnBoard={showOnBoard} goFinances={goFinances} />
       <Projects data={data} update={update} openProject={openProject} />
-      <Board data={data} update={update} />
+      <Board data={data} update={update} filter={filter} setFilter={setFilter} onEdit={setEditing} sectionRef={boardRef} />
+      {editing && <TaskModal task={editing} data={data} onClose={() => setEditing(null)} update={update} />}
     </>
+  );
+}
+
+/* ---------------- Dashboard ---------------- */
+
+function greeting(hour = new Date().getHours()) {
+  return hour < 5 ? 'Good night' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+}
+
+function Dashboard({ data, openTask, openProject, showOnBoard, goFinances }: {
+  data: AppData;
+  openTask: (t: Task) => void;
+  openProject: (id: string) => void;
+  showOnBoard: (f: Partial<BoardFilter>) => void;
+  goFinances: () => void;
+}) {
+  const running = runningEntry(data);
+  const now = useNow(!!running);
+  const today = isoDate();
+  const m = (n: number) => money(n, data.profile.currency);
+  const first = data.profile.name.trim().split(/\s+/)[0];
+
+  const open = data.tasks.filter((t) => t.col !== 'done');
+  const dueToday = open.filter((t) => t.due === today).length;
+  const overdue = open.filter((t) => t.due && t.due < today).length;
+
+  const { thisRev, lastRev, lastKey } = useMemo(() => {
+    const txns = allTxns(data);
+    const k = monthKey();
+    const lk = shiftMonth(k, -1);
+    return {
+      thisRev: totals(txns.filter((t) => t.date.startsWith(k))).rev,
+      lastRev: totals(txns.filter((t) => t.date.startsWith(lk))).rev,
+      lastKey: lk,
+    };
+  }, [data]);
+  const delta = lastRev ? ((thisRev - lastRev) / lastRev) * 100 : null;
+  const goal = data.profile.revenueGoal;
+
+  const unpaid = unpaidInvoices(data);
+  const toCollect = unpaid.reduce((a, e) => a + e.amount, 0);
+  const late = unpaid.filter((e) => isOverdue(e, today)).length;
+
+  const mon = weekStart();
+  const week = data.timeEntries.filter((x) => x.date >= mon);
+  const weekMin = sumMinutes(week, now);
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = addDays(mon, i);
+    return { d, min: sumMinutes(week.filter((x) => x.date === d), now) };
+  });
+  const maxDay = Math.max(60, ...days.map((x) => x.min));
+
+  // Next deadlines: tasks and projects due in the next two weeks, plus anything late.
+  const horizon = addDays(today, 14);
+  const upcoming = [
+    ...open.filter((t) => t.due && t.due <= horizon).map((t) => ({ kind: 'task' as const, id: t.id, date: t.due, title: t.title, projectId: t.projectId, clientId: t.clientId })),
+    ...data.projects
+      .filter((p) => p.status !== 'Done' && p.deadline && p.deadline <= horizon)
+      .map((p) => ({ kind: 'project' as const, id: p.id, date: p.deadline, title: p.name, projectId: p.id, clientId: p.clientId })),
+  ]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(0, 6);
+  const projectOf = (id: string) => data.projects.find((p) => p.id === id);
+  const clientOf = (id: string) => data.clients.find((c) => c.id === id);
+
+  const summary =
+    dueToday || overdue
+      ? `${dueToday ? `${dueToday} ${dueToday === 1 ? 'task' : 'tasks'} due today` : 'Nothing due today'}${overdue ? `, ${overdue} overdue` : ''}.`
+      : open.length
+        ? `Nothing due today. ${open.length} open ${open.length === 1 ? 'task' : 'tasks'} on the board.`
+        : 'Your board is clear.';
+
+  return (
+    <section className="dash">
+      <div className="dash-hello">
+        <div>
+          <h1>{greeting()}{first ? `, ${first}` : ''}</h1>
+          <p className="sub">{summary}</p>
+        </div>
+      </div>
+
+      <div className="dash-grid">
+        <div className="tiles">
+          <button className="tile" onClick={() => showOnBoard({ due: 'today' })}>
+            <span className="tile-k">Due today</span>
+            <span className="tile-v">{dueToday}</span>
+            <span className="tile-s">
+              {overdue ? (
+                <span className="neg" role="link" tabIndex={-1} onClick={(e) => { e.stopPropagation(); showOnBoard({ due: 'overdue' }); }}>
+                  {overdue} overdue · show
+                </span>
+              ) : 'Nothing overdue'}
+            </span>
+          </button>
+
+          <button className="tile" onClick={goFinances}>
+            <span className="tile-k">Revenue in {fmtMonth(monthKey())}</span>
+            <span className="tile-v">{m(thisRev)}</span>
+            {goal > 0 ? (
+              <span className="tile-goal">
+                <span className="goal-bar"><span style={{ width: `${Math.min(100, (thisRev / goal) * 100)}%` }} /></span>
+                <span className="tile-s">{pct((thisRev / goal) * 100)} of {m(goal)} goal</span>
+              </span>
+            ) : (
+              <span className="tile-s">
+                {lastRev ? <>{fmtMonth(lastKey)}: {m(lastRev)}{delta !== null && delta > 0 ? <span className="pos"> · already ▲ {pct(delta)}</span> : null}</> : 'Nothing last month'}
+              </span>
+            )}
+          </button>
+
+          <button className="tile" onClick={goFinances}>
+            <span className="tile-k">To collect</span>
+            <span className="tile-v">{m(toCollect)}</span>
+            <span className="tile-s">
+              {unpaid.length ? (
+                <>{unpaid.length} unpaid {unpaid.length === 1 ? 'invoice' : 'invoices'}{late ? <span className="neg"> · {late} late</span> : ''}</>
+              ) : 'All invoices paid'}
+            </span>
+          </button>
+
+          <div className="tile tile-static">
+            <span className="tile-k">This week</span>
+            <span className="tile-v">{fmtDuration(weekMin)}</span>
+            <span className="week-bars" aria-label="Hours tracked per day this week">
+              {days.map((x) => (
+                <span key={x.d} className={'week-bar' + (x.d === today ? ' is-today' : '')} title={`${fmtDate(x.d, true)}: ${fmtDuration(x.min)}`}>
+                  <span style={{ height: `${Math.max(x.min ? 8 : 3, (x.min / maxDay) * 100)}%` }} />
+                  <i>{'MTWTFSS'[daysBetween(mon, x.d)]}</i>
+                </span>
+              ))}
+            </span>
+          </div>
+        </div>
+
+        <div className="card upcoming">
+          <div className="head">
+            <div className="card-title">Coming up</div>
+            <span className="small">Next 14 days</span>
+          </div>
+          {upcoming.length === 0 && <div className="small upcoming-empty">No deadlines in the next two weeks.</div>}
+          {upcoming.map((u) => {
+            const client = clientOf(u.clientId) ?? clientOf(projectOf(u.projectId)?.clientId ?? '');
+            const n = daysBetween(today, u.date);
+            return (
+              <button
+                key={u.kind + u.id}
+                className="up-row"
+                onClick={() => {
+                  if (u.kind === 'project') openProject(u.id);
+                  else {
+                    const t = data.tasks.find((x) => x.id === u.id);
+                    if (t) openTask(t);
+                  }
+                }}
+              >
+                <span className={'up-date' + (n < 0 ? ' late' : n === 0 ? ' today' : '')}>{dueLabel(u.date, today)}</span>
+                <span className="up-main">
+                  <span className="ellipsis up-title">{u.title}</span>
+                  <span className="up-sub ellipsis">
+                    {u.kind === 'project' ? 'Project deadline' : projectOf(u.projectId)?.name ?? 'Task'}
+                  </span>
+                </span>
+                {client && <span className="swatch" style={{ background: client.color }} title={client.name} />}
+                <IconArrow size={13} />
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -58,6 +270,7 @@ function Projects({ data, update, openProject }: { data: AppData; update: Update
     }
   };
   const confirm = useConfirm();
+  const toast = useToast();
   const today = isoDate();
   const clientOf = (id: string) => data.clients.find((c) => c.id === id);
 
@@ -70,6 +283,7 @@ function Projects({ data, update, openProject }: { data: AppData; update: Update
       ...d,
       projects: [{ id: uid(), ...pf, name: pf.name.trim(), position: topPosition(d.projects) }, ...d.projects],
     }));
+    toast(<>Project <b>{pf.name.trim()}</b> created</>, { tone: 'success' });
     setPf(emptyProject());
     setShowForm(false);
   };
@@ -83,19 +297,14 @@ function Projects({ data, update, openProject }: { data: AppData; update: Update
   const remove = async (p: Project) => {
     const ok = await confirm({
       title: 'Delete this project?',
-      message: <>"{p.name}" will be deleted, along with its brief and journal. Its tasks and transactions are kept, with no project.</>,
+      message: <>"{p.name}" will be deleted, along with its brief and journal. Its tasks, transactions and tracked time are kept, with no project.</>,
       confirmLabel: 'Delete',
       danger: true,
     });
     if (!ok) return;
-    update((d) => ({
-      ...d,
-      projects: d.projects.filter((x) => x.id !== p.id),
-      tasks: d.tasks.map((t) => (t.projectId === p.id ? { ...t, projectId: '' } : t)),
-      entries: d.entries.map((e) => (e.projectId === p.id ? { ...e, projectId: '' } : e)),
-      recurring: d.recurring.map((r) => (r.projectId === p.id ? { ...r, projectId: '' } : r)),
-      notes: d.notes.filter((n) => n.projectId !== p.id),
-    }));
+    const { restore } = removeProject(data, p.id);
+    update((d) => removeProject(d, p.id).data);
+    toast(<>Project <b>{p.name}</b> deleted</>, { undo: () => update(restore) });
   };
 
   return (
@@ -105,7 +314,7 @@ function Projects({ data, update, openProject }: { data: AppData; update: Update
           <svg className="fold-chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="m9 6 6 6-6 6" />
           </svg>
-          <h1>Active projects</h1>
+          <h2>Active projects</h2>
           <span className="sub">{activeCount} active · {data.projects.length} in total</span>
         </button>
         {open && (
@@ -204,42 +413,76 @@ function Projects({ data, update, openProject }: { data: AppData; update: Update
 }
 
 /** Edit a project, or create one when `project` is not in the data yet (see newProject). */
-export function ProjectModal({ project, data, onClose, update, onCreated }: {
+export function ProjectModal({ project, data, onClose, update, onCreated, onDeleted }: {
   project: Project;
   data: AppData;
   onClose: () => void;
   update: Update;
   onCreated?: (id: string) => void;
+  onDeleted?: () => void;
 }) {
   // Snapshot at opening: the diff below must only contain what was changed in this form,
   // even if the project is refreshed from another device while the modal is open.
   const [orig] = useState(project);
   const [f, setF] = useState(project);
+  const [budget, setBudget] = useState(project.budget ? String(project.budget) : '');
   const [creating] = useState(() => !data.projects.some((p) => p.id === project.id));
+  const confirm = useConfirm();
+  const toast = useToast();
+  const budgetValue = budget.trim() ? parseAmount(budget) : 0;
+  const valid = !!f.name.trim() && !dueBeforeStart(f) && budgetValue !== null;
   const save = () => {
-    if (!f.name.trim() || (f.start && !isDay(f.start)) || (f.deadline && !isDay(f.deadline)) || dueBeforeStart(f)) return;
+    if (!valid || (f.start && !isDay(f.start)) || (f.deadline && !isDay(f.deadline))) return;
+    const next = { ...f, name: f.name.trim(), budget: budgetValue ?? 0 };
     if (creating) {
-      update((d) => ({ ...d, projects: [{ ...f, name: f.name.trim(), position: topPosition(d.projects) }, ...d.projects] }));
+      update((d) => ({ ...d, projects: [{ ...next, position: topPosition(d.projects) }, ...d.projects] }));
+      toast(<>Project <b>{next.name}</b> created</>, { tone: 'success' });
       onClose();
       onCreated?.(f.id);
       return;
     }
-    const changed = changedFields(orig, { ...f, name: f.name.trim() });
+    const changed = changedFields(orig, next);
     update((d) => ({ ...d, projects: d.projects.map((p) => (p.id === f.id ? { ...p, ...changed } : p)) }));
     onClose();
   };
+  const remove = async () => {
+    const ok = await confirm({
+      title: 'Delete this project?',
+      message: <>"{project.name}" will be deleted, along with its brief and journal. Its tasks, transactions and tracked time are kept, with no project.</>,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    const { restore } = removeProject(data, project.id);
+    update((d) => removeProject(d, project.id).data);
+    toast(<>Project <b>{project.name}</b> deleted</>, { undo: () => update(restore) });
+    onClose();
+    onDeleted?.();
+  };
   return (
     <Modal title={creating ? 'New project' : 'Edit project'} onClose={onClose}>
-      <form className="form-grid" onSubmit={(e) => { e.preventDefault(); save(); }}>
-        <Field label="Project name"><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
-        <Field label="Client"><ClientSelect data={data} update={update} value={f.clientId} onChange={(clientId) => setF({ ...f, clientId })} /></Field>
-        <Field label="Start"><DatePicker value={f.start} onChange={(start) => setF({ ...f, start })} placeholder="No start date" ariaLabel="Start" /></Field>
-        <Field label="Due"><DatePicker value={f.deadline} onChange={(deadline) => setF({ ...f, deadline })} min={f.start || undefined} placeholder="No due date" ariaLabel="Due" /></Field>
-        <Field label="Status">
-          <Select value={f.status} onChange={(status) => setF({ ...f, status })} options={STATUS_OPTIONS} ariaLabel="Status" />
-        </Field>
-        <button className="btn tall" type="submit" disabled={!f.name.trim() || dueBeforeStart(f)}>{creating ? 'Create' : 'Save'}</button>
+      <form className="section" onSubmit={(e) => { e.preventDefault(); save(); }}>
+        <div className="form-grid">
+          <Field label="Project name"><input className="input" autoFocus={creating} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Website redesign…" /></Field>
+          <Field label="Client"><ClientSelect data={data} update={update} value={f.clientId} onChange={(clientId) => setF({ ...f, clientId })} /></Field>
+          <Field label="Start"><DatePicker value={f.start} onChange={(start) => setF({ ...f, start })} placeholder="No start date" ariaLabel="Start" /></Field>
+          <Field label="Due"><DatePicker value={f.deadline} onChange={(deadline) => setF({ ...f, deadline })} min={f.start || undefined} placeholder="No due date" ariaLabel="Due" /></Field>
+          <Field label="Status">
+            <Select value={f.status} onChange={(status) => setF({ ...f, status })} options={STATUS_OPTIONS} ariaLabel="Status" />
+          </Field>
+          <Field label={`Budget excl. tax (${data.profile.currency})`}>
+            <input className="input" inputMode="decimal" value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="Agreed price, optional" />
+          </Field>
+        </div>
         {dueBeforeStart(f) && <div className="small form-error">The due date can't be before the start date.</div>}
+        {budgetValue === null && <div className="small form-error">Invalid amount. Examples: 12000 · 12 000 · 12000.50</div>}
+        <div className="modal-foot">
+          {creating ? <span /> : <button className="btn sm danger" type="button" onClick={() => void remove()}>Delete project</button>}
+          <div className="row" style={{ gap: '0.5rem' }}>
+            <button className="btn sm ghost" type="button" onClick={onClose}>Cancel</button>
+            <button className="btn sm" type="submit" disabled={!valid}>{creating ? 'Create project' : 'Save'}</button>
+          </div>
+        </div>
       </form>
     </Modal>
   );
@@ -249,15 +492,23 @@ export const newProject = (): Project => ({ id: uid(), ...emptyProject(), positi
 
 /* ---------------- Kanban ---------------- */
 
-function Board({ data, update }: { data: AppData; update: Update }) {
+const PRIORITY_RANK = { none: 0, low: 1, medium: 2, high: 3 } as const;
+
+function Board({ data, update, filter, setFilter, onEdit, sectionRef }: {
+  data: AppData;
+  update: Update;
+  filter: BoardFilter;
+  setFilter: (f: BoardFilter) => void;
+  onEdit: (t: Task) => void;
+  sectionRef: React.RefObject<HTMLElement | null>;
+}) {
   const [adding, setAdding] = useState<TaskColumn | null>(null);
   const [title, setTitle] = useState('');
-  const [projectId, setProjectId] = useState('');
-  const [clientId, setClientId] = useState('');
   const [dragId, setDragId] = useState<string | null>(null);
   // Done tasks older than a week stay in the database but leave the board, unless shown on demand.
   const [showArchived, setShowArchived] = useState(false);
-  const now = Date.now();
+  const running = runningEntry(data);
+  const now = useNow(!!running);
   // Where a dragged card would land: in `col`, just before card `before` (null = at the end).
   const [drop, setDrop] = useState<{ col: TaskColumn; before: string | null } | null>(null);
   // Card to refocus after a keyboard move (React may move the focused node).
@@ -267,21 +518,44 @@ function Board({ data, update }: { data: AppData; update: Update }) {
     document.querySelector<HTMLElement>(`.task[data-id="${focusId}"]`)?.focus();
     setFocusId(null);
   }, [focusId, data.tasks]);
-  const [editing, setEditing] = useState<Task | null>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  // "/" anywhere (outside a field) jumps to the task search.
+  useEffect(() => {
+    const onFocus = () => searchRef.current?.focus();
+    window.addEventListener('cockpit:search-tasks', onFocus);
+    return () => window.removeEventListener('cockpit:search-tasks', onFocus);
+  }, []);
+  const toast = useToast();
   const today = isoDate();
+  const weekEnd = addDays(today, 7);
   const projectOf = (id: string) => data.projects.find((p) => p.id === id);
   const clientOf = (id: string) => data.clients.find((c) => c.id === id);
-  const openProjects = data.projects.filter((p) => p.status !== 'Done');
-  // A task follows its project's client unless another client is picked for it.
-  const pickProject = (id: string) => {
-    setProjectId(id);
-    if (clientId && clientId === projectOf(id)?.clientId) setClientId('');
+
+  const active = filter.q.trim() !== '' || filter.clientId !== '' || filter.projectId !== '' || filter.due !== 'all' || filter.priority !== 'any';
+  const q = filter.q.trim().toLowerCase();
+  const matches = (t: Task) => {
+    const project = projectOf(t.projectId);
+    const client = clientOf(t.clientId) ?? clientOf(project?.clientId ?? '');
+    if (filter.clientId && client?.id !== filter.clientId) return false;
+    if (filter.projectId && t.projectId !== filter.projectId) return false;
+    if (filter.priority !== 'any' && PRIORITY_RANK[t.priority] < PRIORITY_RANK[filter.priority]) return false;
+    if (filter.due !== 'all') {
+      if (t.col === 'done' || !t.due) return false;
+      if (filter.due === 'overdue' && !(t.due < today)) return false;
+      if (filter.due === 'today' && t.due !== today) return false;
+      if (filter.due === 'week' && !(t.due <= weekEnd)) return false;
+    }
+    if (q) {
+      const hay = [t.title, t.note, project?.name, client?.name, ...t.checklist.map((c) => c.text)].join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
   };
 
   const place = (id: string, col: TaskColumn, before: string | null) => update((d) => placeTask(d, id, col, before));
   // Cards as shown in a column (archived ones only when displayed), for keyboard / arrow moves.
   const ordered = (col: TaskColumn) =>
-    data.tasks.filter((t) => t.col === col && (showArchived || !isArchived(t, now))).sort((a, b) => a.position - b.position);
+    data.tasks.filter((t) => t.col === col && (showArchived || !isArchived(t, now)) && matches(t)).sort((a, b) => a.position - b.position);
   // Keyboard and phone buttons: one step up/down, or to the next/previous column (at the end).
   const step = (t: Task, dir: 'up' | 'down' | 'left' | 'right') => {
     const list = ordered(t.col);
@@ -312,14 +586,22 @@ function Board({ data, update }: { data: AppData; update: Update }) {
     const el = document.querySelector<HTMLElement>(`.task[data-id="${a.id}"]`);
     if (el) window.scrollBy(0, el.getBoundingClientRect().top - a.top);
   }, [data.tasks]);
-  const confirm = useConfirm();
-  const removeTask = async (t: Task) => {
-    // No undo: on touch screens, where a mis-tap is easy, ask first.
-    if (window.matchMedia('(hover: none)').matches) {
-      const ok = await confirm({ title: 'Delete this task?', message: t.title, confirmLabel: 'Delete', danger: true });
-      if (!ok) return;
+
+  // Deleting is instant: the toast offers Undo for a few seconds.
+  const removeTask = (t: Task) => {
+    const { restore } = removeRow(data, 'tasks', t.id);
+    update((d) => removeRow(d, 'tasks', t.id).data);
+    toast(<>Task <b>{t.title}</b> deleted</>, { undo: () => update(restore) });
+  };
+  const toggleTimer = (t: Task) => {
+    if (running?.taskId === t.id) {
+      const { added } = stopTimers(data);
+      update((d) => stopTimers(d).data);
+      toast(added ? <>{fmtDuration(added)} logged on <b>{t.title}</b></> : 'Timer stopped (under a minute, not logged)');
+    } else {
+      update((d) => startTimer(d, { projectId: t.projectId, taskId: t.id }));
+      toast(<>Timer started on <b>{t.title}</b></>);
     }
-    update((d) => ({ ...d, tasks: d.tasks.filter((x) => x.id !== t.id) }));
   };
 
   // The card whose top half the pointer is above; null means the end of the column.
@@ -345,25 +627,23 @@ function Board({ data, update }: { data: AppData; update: Update }) {
   const add = () => {
     const t = title.trim();
     if (!t || !adding) return;
+    // New cards pick up the board filters, so they stay visible.
     update((d) => ({
       ...d,
       tasks: [
         ...d.tasks,
         {
-          id: uid(), title: t, col: adding,
-          clientId: d.clients.some((c) => c.id === clientId) ? clientId : '',
-          projectId: d.projects.some((p) => p.id === projectId) ? projectId : '',
-          due: '', note: '', position: nextPosition(d.tasks), doneAt: adding === 'done' ? new Date().toISOString() : '',
+          ...newTask(adding, d.projects.some((p) => p.id === filter.projectId) ? filter.projectId : ''),
+          title: t,
+          clientId: !filter.projectId && d.clients.some((c) => c.id === filter.clientId) ? filter.clientId : '',
+          priority: filter.priority === 'any' ? 'none' : filter.priority,
+          due: filter.due === 'today' ? today : '',
+          position: nextPosition(d.tasks),
+          doneAt: adding === 'done' ? new Date().toISOString() : '',
         },
       ],
     }));
     setTitle('');
-  };
-  const startAdd = (col: TaskColumn) => {
-    setAdding(col);
-    setTitle('');
-    setProjectId('');
-    setClientId('');
   };
 
   const onDrop = (e: DragEvent<HTMLDivElement>, col: TaskColumn) => {
@@ -374,17 +654,59 @@ function Board({ data, update }: { data: AppData; update: Update }) {
     setDrop(null);
   };
 
+  const clientOptions = [{ value: '', label: 'All clients' }, ...data.clients.map((c) => ({ value: c.id, label: c.name, color: c.color }))];
+  const projectOptions = [
+    { value: '', label: 'All projects' },
+    ...data.projects.filter((p) => p.status !== 'Done' || p.id === filter.projectId).map((p) => ({ value: p.id, label: p.name, color: clientOf(p.clientId)?.color })),
+  ];
+  const priorityOptions = [
+    { value: 'any' as const, label: 'Any priority' },
+    { value: 'high' as const, label: 'High only', color: priorityMeta('high').color },
+    { value: 'medium' as const, label: 'Medium and up', color: priorityMeta('medium').color },
+  ];
+  const visible = data.tasks.filter((t) => (showArchived || !isArchived(t, now)));
+  const shown = visible.filter(matches).length;
+
   return (
-    <section className="section">
-      <div className="head-title">
-        <h2>Tasks</h2>
-        <span className="sub">Drag cards to reorder them or move them to another column, click a card to edit it</span>
+    <section className="section" ref={sectionRef} style={{ scrollMarginTop: '1rem' }}>
+      <div className="head">
+        <div className="head-title">
+          <h2>Tasks</h2>
+          <span className="sub">{active ? `${shown} of ${visible.length} shown` : 'Drag cards to reorder them or move them to another column'}</span>
+        </div>
+        <button className="btn" onClick={() => onEdit(newTask('todo', filter.projectId))}>+ New task</button>
       </div>
+
+      <div className="board-tools">
+        <label className="search">
+          <IconSearch />
+          <input
+            ref={searchRef}
+            value={filter.q}
+            onChange={(e) => setFilter({ ...filter, q: e.target.value })}
+            onKeyDown={(e) => e.key === 'Escape' && (setFilter({ ...filter, q: '' }), (e.target as HTMLInputElement).blur())}
+            placeholder="Search tasks"
+            aria-label="Search tasks"
+          />
+          {filter.q ? (
+            <button className="x" onClick={() => setFilter({ ...filter, q: '' })} aria-label="Clear search">×</button>
+          ) : (
+            <kbd>/</kbd>
+          )}
+        </label>
+        <div className="tool-sel"><Select value={filter.clientId} onChange={(clientId) => setFilter({ ...filter, clientId })} options={clientOptions} size="sm" ariaLabel="Filter by client" /></div>
+        <div className="tool-sel"><Select value={filter.projectId} onChange={(projectId) => setFilter({ ...filter, projectId })} options={projectOptions} size="sm" ariaLabel="Filter by project" /></div>
+        <div className="tool-sel"><Select value={filter.priority} onChange={(priority) => setFilter({ ...filter, priority })} options={priorityOptions} size="sm" ariaLabel="Filter by priority" /></div>
+        <Seg label="Due" value={filter.due} onChange={(due) => setFilter({ ...filter, due })} options={[['all', 'All'], ['overdue', 'Overdue'], ['today', 'Today'], ['week', '7 days']]} />
+        {active && <button className="btn sm ghost" onClick={() => setFilter(NO_FILTER)}>Clear filters</button>}
+      </div>
+
       <div className="board">
         {COLUMNS.map((c) => {
           const all = data.tasks.filter((t) => t.col === c.key).sort((a, b) => a.position - b.position);
           const archived = all.filter((t) => isArchived(t, now)).length;
-          const tasks = showArchived ? all : all.filter((t) => !isArchived(t, now));
+          const inCol = showArchived ? all : all.filter((t) => !isArchived(t, now));
+          const tasks = inCol.filter(matches);
           return (
             <div
               key={c.key}
@@ -399,13 +721,20 @@ function Board({ data, update }: { data: AppData; update: Update }) {
             >
               <div className="col-head">
                 <div className="col-name"><span className="dot round" style={{ background: c.dot }} />{c.label}</div>
-                <span className="count">{tasks.length}</span>
+                <span className="count">{active && tasks.length !== inCol.length ? `${tasks.length}/${inCol.length}` : tasks.length}</span>
               </div>
               {tasks.map((t, idx) => {
                 const project = projectOf(t.projectId);
                 const pn = project?.name ?? '';
                 const client = clientOf(t.clientId) ?? clientOf(project?.clientId ?? '');
-                const late = t.due && t.due < today && t.col !== 'done';
+                const open = t.col !== 'done';
+                const late = open && !!t.due && t.due < today;
+                const isToday = open && t.due === today;
+                const pri = priorityMeta(t.priority);
+                const checks = t.checklist.length;
+                const checked = t.checklist.filter((x) => x.done).length;
+                const timing = running?.taskId === t.id;
+                const logged = data.timeEntries.filter((x) => x.taskId === t.id).reduce((a, x) => a + entryMinutes(x, now), 0);
                 return (
                   <div
                     key={t.id}
@@ -413,6 +742,9 @@ function Board({ data, update }: { data: AppData; update: Update }) {
                     className={
                       'task' +
                       (dragId === t.id ? ' dragging' : '') +
+                      (late ? ' is-late' : isToday ? ' is-today' : '') +
+                      (timing ? ' is-running' : '') +
+                      (t.col === 'done' ? ' is-done' : '') +
                       (drop?.col === c.key && drop.before === t.id && !isNoop(c.key, t.id) ? ' drop-before' : '')
                     }
                     draggable
@@ -421,7 +753,7 @@ function Board({ data, update }: { data: AppData; update: Update }) {
                     aria-label={`Edit task ${t.title}. Alt + arrow keys to move it.`}
                     onDragStart={(e) => { e.dataTransfer.setData('text/plain', t.id); e.dataTransfer.effectAllowed = 'move'; setDragId(t.id); }}
                     onDragEnd={() => { setDragId(null); setDrop(null); }}
-                    onClick={() => setEditing(t)}
+                    onClick={() => onEdit(t)}
                     onKeyDown={(e) => {
                       if (e.target !== e.currentTarget) return;
                       if (e.altKey && e.key.startsWith('Arrow')) {
@@ -429,20 +761,51 @@ function Board({ data, update }: { data: AppData; update: Update }) {
                         step(t, e.key.slice(5).toLowerCase() as 'up' | 'down' | 'left' | 'right');
                         return;
                       }
-                      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditing(t); }
+                      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onEdit(t); }
                     }}
                   >
-                    {client && <ClientChip client={client} size="sm" />}
+                    {(client || t.priority !== 'none') && (
+                      <div className="task-labels">
+                        {client ? <ClientChip client={client} size="sm" /> : <span />}
+                        {t.priority !== 'none' && (
+                          <span className={'prio prio-' + t.priority} style={{ color: pri.color }} title={`${pri.label} priority`}>
+                            <IconFlag size={11} />{t.priority === 'high' ? 'High' : ''}
+                          </span>
+                        )}
+                      </div>
+                    )}
                     <div className="task-top">
                       <span className="task-title">{t.title}</span>
-                      <button className="x" aria-label="Delete task" onClick={(e) => { e.stopPropagation(); void removeTask(t); }}>×</button>
+                      <span className="task-btns">
+                        {open && (
+                          <button
+                            className={'task-play' + (timing ? ' on' : '')}
+                            aria-label={timing ? 'Stop timer' : 'Start timer'}
+                            title={timing ? 'Stop timer' : 'Start timer'}
+                            onClick={(e) => { e.stopPropagation(); toggleTimer(t); }}
+                          >
+                            {timing ? <IconStop size={10} /> : <IconPlay size={10} />}
+                          </button>
+                        )}
+                        <button className="x" aria-label="Delete task" onClick={(e) => { e.stopPropagation(); removeTask(t); }}>×</button>
+                      </span>
                     </div>
                     <div className="task-foot">
-                      {(pn || t.due || t.note) && (
+                      {(pn || t.due || t.note || checks > 0 || logged > 0 || timing) && (
                         <div className="task-meta">
                           {pn && <span className="tag">{pn}</span>}
-                          {t.due && <span className={'due' + (late ? ' late' : '')}>{t.due === today ? 'Today' : fmtDate(t.due, true)}</span>}
-                          {t.note && <span className="note-flag" title={t.note}>≡ note</span>}
+                          {t.due && <span className={'due' + (late ? ' late' : isToday ? ' today' : '')}>{t.col === 'done' ? fmtDate(t.due, true) : dueLabel(t.due, today)}</span>}
+                          {checks > 0 && (
+                            <span className={'meta-chip' + (checked === checks ? ' complete' : '')} title="Checklist">
+                              <IconChecks size={12} />{checked}/{checks}
+                            </span>
+                          )}
+                          {timing && running ? (
+                            <span className="meta-chip live"><span className="live-dot" />{fmtClock(entryMinutes(running, now) * 60_000)}</span>
+                          ) : logged > 0 ? (
+                            <span className="meta-chip" title="Time logged"><IconClock size={12} />{fmtDuration(logged)}</span>
+                          ) : null}
+                          {t.note && <span className="note-flag" title={t.note}>≡</span>}
                         </div>
                       )}
                       {/* Touch screens only (no drag and drop there): bottom right, away from the delete button. */}
@@ -451,9 +814,11 @@ function Board({ data, update }: { data: AppData; update: Update }) {
                         <button className="order-btn" aria-label="Move down" disabled={idx === tasks.length - 1} onClick={(e) => { e.stopPropagation(); tapStep(e, t, 'down'); }}>↓</button>
                       </span>
                     </div>
+                    {checks > 0 && <span className="task-progress"><span style={{ width: `${(checked / checks) * 100}%` }} /></span>}
                   </div>
                 );
               })}
+              {tasks.length === 0 && active && inCol.length > 0 && <div className="col-empty">No match here</div>}
               {drop?.col === c.key && drop.before === null && !isNoop(c.key, null) && <div className="drop-end" />}
               {archived > 0 && (
                 <button className="archived-link" onClick={() => setShowArchived(!showArchived)} aria-pressed={showArchived}>
@@ -468,85 +833,22 @@ function Board({ data, update }: { data: AppData; update: Update }) {
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     onKeyDown={(e) => e.key === 'Escape' && setAdding(null)}
-                    placeholder="Task title"
+                    placeholder="Task title, then Enter"
                   />
-                  <ClientSelect data={data} update={update} value={clientId} onChange={setClientId} size="sm" inherited={clientOf(projectOf(projectId)?.clientId ?? '')} />
-                  <ProjectSelect projects={openProjects} clients={data.clients} value={projectId} onChange={pickProject} size="sm" />
                   <div className="row" style={{ gap: '0.5rem' }}>
                     <button className="btn sm" type="submit">Add</button>
                     <button className="btn sm ghost" type="button" onClick={() => setAdding(null)}>Close</button>
+                    <button className="btn sm ghost" type="button" style={{ marginLeft: 'auto' }} onClick={() => { setAdding(null); onEdit({ ...newTask(c.key, filter.projectId), title }); }}>More…</button>
                   </div>
                 </form>
               ) : (
-                <button className="add-link" onClick={() => startAdd(c.key)}>+ Add a task</button>
+                <button className="add-link" onClick={() => { setAdding(c.key); setTitle(''); }}>+ Add a task</button>
               )}
             </div>
           );
         })}
       </div>
-      {editing && <TaskModal task={editing} data={data} onClose={() => setEditing(null)} update={update} />}
     </section>
   );
 }
 
-function TaskModal({ task, data, onClose, update }: { task: Task; data: AppData; onClose: () => void; update: Update }) {
-  const [f, setF] = useState(task);
-  const projectClient = (id: string) => data.clients.find((c) => c.id === data.projects.find((p) => p.id === id)?.clientId);
-  // The task's own client only overrides its project's: drop it when it would say the same thing.
-  const pickProject = (projectId: string) =>
-    setF({ ...f, projectId, clientId: f.clientId && f.clientId === projectClient(projectId)?.id ? '' : f.clientId });
-  const save = () => {
-    if (!f.title.trim() || (f.due && !isDay(f.due))) return;
-    // Apply only what was changed in this form, on top of the current row (it may have been
-    // updated from another device while the form was open).
-    const changed = changedFields(task, { ...f, title: f.title.trim() });
-    update((d) => ({
-      ...d,
-      tasks: d.tasks.map((t) =>
-        t.id === f.id
-          ? { ...withCol({ ...t, ...changed, col: t.col }, changed.col ?? t.col), position: 'col' in changed ? nextPosition(d.tasks) : t.position }
-          : t,
-      ),
-    }));
-    onClose();
-  };
-  const remove = () => {
-    update((d) => ({ ...d, tasks: d.tasks.filter((t) => t.id !== f.id) }));
-    onClose();
-  };
-  return (
-    <Modal title="Task" onClose={onClose}>
-      <form className="section" onSubmit={(e) => { e.preventDefault(); save(); }}>
-        <Field label="Title"><input className="input" autoFocus value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} /></Field>
-        <div className="form-grid">
-          <Field label="Client">
-            <ClientSelect
-              data={data}
-              update={update}
-              value={f.clientId}
-              onChange={(clientId) => setF({ ...f, clientId: clientId === projectClient(f.projectId)?.id ? '' : clientId })}
-              inherited={projectClient(f.projectId)}
-            />
-          </Field>
-          <Field label="Project">
-            <ProjectSelect projects={data.projects} clients={data.clients} value={f.projectId} onChange={pickProject} />
-          </Field>
-          <Field label="Column">
-            <Select value={f.col} onChange={(col) => setF({ ...f, col })} options={COLUMN_OPTIONS} ariaLabel="Column" />
-          </Field>
-          <Field label="Due">
-            <DatePicker value={f.due} onChange={(due) => setF({ ...f, due })} placeholder="No due date" ariaLabel="Due" />
-          </Field>
-        </div>
-        <Field label="Note"><textarea className="input" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="Details, link, next step…" /></Field>
-        <div className="modal-foot">
-          <button className="btn sm danger" type="button" onClick={remove}>Delete</button>
-          <div className="row" style={{ gap: '0.5rem' }}>
-            <button className="btn sm ghost" type="button" onClick={onClose}>Cancel</button>
-            <button className="btn sm" type="submit">Save</button>
-          </div>
-        </div>
-      </form>
-    </Modal>
-  );
-}

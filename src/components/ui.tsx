@@ -172,3 +172,28 @@ export function ThemeMini({ dark, onToggle }: { dark: boolean; onToggle: (origin
     </button>
   );
 }
+
+export const IconPlay = ({ size = 14 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5Z" /></svg>
+);
+export const IconStop = ({ size = 14 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2.5" /></svg>
+);
+export const IconClock = ({ size = 13 }: { size?: number }) => (
+  <Svg size={size}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></Svg>
+);
+export const IconSearch = ({ size = 15 }: { size?: number }) => (
+  <Svg size={size}><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></Svg>
+);
+export const IconChecks = ({ size = 13 }: { size?: number }) => (
+  <Svg size={size}><rect x="3" y="3" width="18" height="18" rx="4" /><path d="m8 12 3 3 5-6" /></Svg>
+);
+export const IconFlag = ({ size = 12 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M5 2a1 1 0 0 1 1 1v.6c1.9-.9 4-1 6.1-.1 1.8.8 3.6.8 5.5-.1A1 1 0 0 1 19 4.3v9.4a1 1 0 0 1-.6.9c-2.3 1.1-4.6 1.2-6.9.2-1.8-.8-3.6-.7-5.5.3V21a1 1 0 1 1-2 0V3a1 1 0 0 1 1-1Z" /></svg>
+);
+export const IconPlus = ({ size = 14 }: { size?: number }) => (
+  <Svg size={size}><path d="M12 5v14M5 12h14" /></Svg>
+);
+export const IconArrow = ({ size = 14 }: { size?: number }) => (
+  <Svg size={size}><path d="M5 12h14M13 6l6 6-6 6" /></Svg>
+);
