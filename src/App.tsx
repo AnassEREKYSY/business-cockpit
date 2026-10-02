@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Avatar, BrandMark, IconData, IconFinance, IconOverview, IconProjects } from './components/ui';
+import { Avatar, BrandMark, IconData, IconFinance, IconOverview, IconProjects, ThemeMini, ThemeSwitch } from './components/ui';
+import { resolved, useTheme } from './lib/theme';
 import { allTxns, totals } from './lib/finance';
 import { monthKey, pct } from './lib/format';
 import { useConfirm } from './components/Confirm';
@@ -41,6 +42,7 @@ const SYNC_LABEL: Record<SyncStatus, string> = {
 export default function App({ repo, account }: { repo: Repository; account?: Account }) {
   const { data, update, status, rejection, retryLoad, hasUnsaved } = useAppData(repo);
   const confirm = useConfirm();
+  const { pref, setTheme } = useTheme();
   const signOut = account
     ? async () => {
         if (
@@ -130,7 +132,11 @@ export default function App({ repo, account }: { repo: Repository; account?: Acc
           <div className="glance-row"><span>Blocked tasks</span><b className={glance.blocked ? 'bad' : ''}>{glance.blocked}</b></div>
           <div className="glance-row"><span>This month's margin</span><b>{glance.hasRevenue ? pct(glance.netRate) : '—'}</b></div>
         </div>
-        <button className="me" onClick={() => setPage('data')} title="Edit profile">
+        <div className="glance" style={{ marginTop: 'auto' }}>
+          <div className="eyebrow">Theme</div>
+          <ThemeSwitch pref={pref} onChange={setTheme} />
+        </div>
+        <button className="me" style={{ marginTop: 0 }} onClick={() => setPage('data')} title="Edit profile">
           <Avatar name={P.name} photo={P.avatar} />
           <div style={{ minWidth: 0 }}>
             <div className="me-name ellipsis">{P.name || 'Your name'}</div>
@@ -144,11 +150,11 @@ export default function App({ repo, account }: { repo: Repository; account?: Acc
           <div className="row" style={{ gap: '0.5rem' }}>
             <span className="mobile-brand"><BrandMark size={24} /></span>
             <span>{P.company || 'My business'}</span>
-            <span>›</span>
+            <span className="sep">/</span>
             {openedProject ? (
               <>
                 <button className="crumb-link" onClick={() => setPage('projects')}>Projects</button>
-                <span>›</span>
+                <span className="sep">/</span>
                 <span className="here ellipsis" style={{ maxWidth: '16rem' }}>{openedProject.name}</span>
               </>
             ) : (
@@ -163,6 +169,7 @@ export default function App({ repo, account }: { repo: Repository; account?: Acc
               </span>
             )}
             <span className="today">{today}</span>
+            <ThemeMini dark={resolved(pref) === 'dark'} onToggle={(o) => setTheme(resolved(pref) === 'dark' ? 'light' : 'dark', o)} />
           </div>
         </div>
 
@@ -176,12 +183,14 @@ export default function App({ repo, account }: { repo: Repository; account?: Acc
           </div>
         )}
 
+        <div className="page" key={page + route.projectId}>
         {page === 'overview' && <OverviewPage data={data} update={update} openProject={openProject} />}
         {page === 'projects' && (
           <ProjectsPage data={data} update={update} projectId={route.projectId} openProject={openProject} back={() => setPage('projects')} />
         )}
         {page === 'fin' && <FinancesPage data={data} update={update} goToData={() => setPage('data')} />}
         {page === 'data' && <DataPage data={data} update={update} account={session} />}
+        </div>
       </main>
 
       <nav className="tabbar">{nav}</nav>

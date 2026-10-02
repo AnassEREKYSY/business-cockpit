@@ -7,6 +7,7 @@ Your business cockpit for freelancers and small studios: projects, a daily task 
 - **Overview**: your active projects and a task board in 4 columns (To do, In progress, Blocked, Done). Drag cards to move or reorder them. Done tasks disappear from the board after a week (they stay saved).
 - **Projects**: one page per project with a brief (context, goal, deliverables, out of scope) and a dated journal (calls, decisions, notes).
 - **Finances**: revenue, direct costs, overheads and margin for one month, 3 months, 12 months or all time. Subscriptions, retainers and contractors are entered once and counted every month automatically.
+- **Light and dark themes**: a clean black and white look. Follows your device by default; switch Light / Dark / System at the bottom of the sidebar (the sun / moon button on phones).
 - **Data & profile**: your name, photo and currency, your clients and their colours, transactions, recurring items, and a backup file you can download.
 
 ![Cockpit, task board](docs/tasks.png)
@@ -175,7 +176,7 @@ Where things live, if you want to look yourself:
 | --- | --- |
 | App name | the `Cockpit` text in `index.html`, `src/App.tsx` and `src/pages/LoginPage.tsx` |
 | Logo | `public/logo.svg` and `public/favicon.svg`. If your logo is not the same shape, adjust the ratio in `BrandMark` (`src/components/ui.tsx`) |
-| Colours, spacing | CSS variables at the top of `src/index.css`. Overall size: the `html { font-size: clamp(...) }` rule in the same file |
+| Colours, spacing | Theme tokens at the top of `src/index.css` (each one is `light-dark(light value, dark value)`). Overall size: the `html { font-size: clamp(...) }` rule in the same file |
 | Finance categories | `CATEGORIES` in `src/lib/constants.ts` |
 | Names shown for statuses, task columns, journal entry types | `src/lib/constants.ts` (labels only) |
 | Currencies offered, date and number format | `CURRENCIES` and `LOCALE` in `src/lib/constants.ts` |

@@ -7,21 +7,27 @@ import type { EntryType, NoteKind, ProjectStatus, TaskColumn } from '../types';
  */
 export const LOCALE = 'en-GB';
 
+/** Soft pill colours from one hue, readable in light and dark themes (mixed with the theme's surface and ink). */
+export const soft = (hue: string) => ({
+  bg: `color-mix(in srgb, ${hue} 14%, var(--surface))`,
+  color: `color-mix(in srgb, ${hue} 78%, var(--ink))`,
+});
+
 export const PROJECT_STATUSES: ProjectStatus[] = ['Not started', 'In progress', 'On hold', 'Done'];
 
 export const STATUS_META: Record<ProjectStatus, { label: string; bg: string; color: string }> = {
-  'In progress': { label: 'In progress', bg: '#fff3de', color: '#b36b00' },
-  'Not started': { label: 'Not started', bg: '#fde8e8', color: '#c43d3d' },
-  'On hold': { label: 'On hold', bg: '#eceef2', color: '#5b6270' },
-  'Done': { label: 'Done', bg: '#e3f6e8', color: '#1f8a47' },
+  'In progress': { label: 'In progress', ...soft('#f59e0b') },
+  'Not started': { label: 'Not started', ...soft('#ef4444') },
+  'On hold': { label: 'On hold', ...soft('#8b8b94') },
+  'Done': { label: 'Done', ...soft('#22c55e') },
 };
 export const statusLabel = (s: ProjectStatus) => STATUS_META[s]?.label ?? s;
 
 export const COLUMNS: { key: TaskColumn; label: string; dot: string }[] = [
-  { key: 'todo', label: 'To do', dot: '#9aa0ae' },
-  { key: 'ongoing', label: 'In progress', dot: '#e9a23b' },
-  { key: 'blocked', label: 'Blocked', dot: '#e0525a' },
-  { key: 'done', label: 'Done', dot: '#2fa565' },
+  { key: 'todo', label: 'To do', dot: 'var(--faint)' },
+  { key: 'ongoing', label: 'In progress', dot: 'var(--amber)' },
+  { key: 'blocked', label: 'Blocked', dot: 'var(--red-2)' },
+  { key: 'done', label: 'Done', dot: 'var(--green-2)' },
 ];
 
 export const CATEGORIES: Record<EntryType, string[]> = {
@@ -60,9 +66,9 @@ const CATEGORY_LABELS: Record<string, string> = {
 export const catLabel = (c: string) => CATEGORY_LABELS[c] ?? c;
 
 export const TYPE_META: Record<EntryType, { label: string; short: string; bg: string; color: string }> = {
-  revenue: { label: 'Revenue', short: 'Revenue', bg: '#e8effc', color: '#2f6fde' },
-  direct: { label: 'Direct cost', short: 'Direct cost', bg: '#fff3de', color: '#b36b00' },
-  opex: { label: 'Operating expense', short: 'Operating', bg: '#fde8e8', color: '#c43d3d' },
+  revenue: { label: 'Revenue', short: 'Revenue', ...soft('#3b82f6') },
+  direct: { label: 'Direct cost', short: 'Direct cost', ...soft('#f59e0b') },
+  opex: { label: 'Operating expense', short: 'Operating', ...soft('#ef4444') },
 };
 
 export const CURRENCIES = [
@@ -75,11 +81,11 @@ export const CURRENCIES = [
 ];
 
 export const NOTE_KINDS: { key: NoteKind; label: string; bg: string; color: string }[] = [
-  { key: 'note', label: 'Note', bg: '#f1f3f7', color: '#4a5061' },
-  { key: 'call', label: 'Call', bg: '#eeedfe', color: '#3c3489' },
-  { key: 'decision', label: 'Decision', bg: '#faece7', color: '#712b13' },
-  { key: 'feedback', label: 'Client feedback', bg: '#e6f1fb', color: '#0c447c' },
-  { key: 'email', label: 'Email', bg: '#e1f5ee', color: '#085041' },
+  { key: 'note', label: 'Note', ...soft('#8b8b94') },
+  { key: 'call', label: 'Call', ...soft('#8b5cf6') },
+  { key: 'decision', label: 'Decision', ...soft('#f97316') },
+  { key: 'feedback', label: 'Client feedback', ...soft('#3b82f6') },
+  { key: 'email', label: 'Email', ...soft('#14b8a6') },
 ];
 
 export const BRIEF_FIELDS: { key: 'context' | 'goal' | 'deliverables' | 'out'; label: string; placeholder: string }[] = [

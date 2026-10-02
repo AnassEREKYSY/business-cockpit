@@ -7,7 +7,7 @@ import { ProjectSelect } from '../components/pickers';
 import { Select } from '../components/Select';
 import { Avatar, Field, IconPencil, Seg } from '../components/ui';
 import { nextColor } from '../lib/colors';
-import { CATEGORIES, CURRENCIES, LOCALE, TYPE_META, catLabel } from '../lib/constants';
+import { CATEGORIES, CURRENCIES, LOCALE, TYPE_META, catLabel, soft } from '../lib/constants';
 import { isActive, isFuture, monthlyEquivalent, parseAmount } from '../lib/finance';
 import { fmtDate, isoDate, money, uid } from '../lib/format';
 import { demoData, isDay, normalize } from '../lib/store';
@@ -209,7 +209,7 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
             <div className="card-title">Subscriptions &amp; recurring <span className="small" style={{ fontWeight: 500 }}>{data.recurring.length}</span></div>
             <div className="small">Software, fixed subcontracting, rent, client retainers. Enter them once, they are counted automatically every month.</div>
           </div>
-          {burn > 0 && <div className="pill" style={{ background: '#fff3de', color: '#b36b00', fontSize: '0.75rem' }}>{m(burn)} / month in fixed costs</div>}
+          {burn > 0 && <div className="pill" style={{ ...soft('#f59e0b'), fontSize: '0.75rem' }}>{m(burn)} / month in fixed costs</div>}
         </div>
         <form className="form-grid" onSubmit={(e) => { e.preventDefault(); addRec(); }}>
           <Field label="Name"><input className="input" value={rf.label} onChange={(e) => setRf({ ...rf, label: e.target.value })} placeholder="Notion, freelancer, retainer…" /></Field>

@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from 'react';
 import { initials } from '../lib/format';
+import type { ThemePref } from '../lib/theme';
 
 export function Seg<T extends string>({ options, value, onChange, label }: {
   options: [T, string][];
@@ -59,9 +60,16 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
   );
 }
 
-/** Brand mark (public/logo.svg), height in px; width follows the logo's ratio. */
+/** Brand mark, drawn inline so it follows the theme (ink square, background-coloured gauge). */
 export const BrandMark = ({ size = 32 }: { size?: number }) => (
-  <img src="/logo.svg" alt="" className="brand-logo" style={{ height: `${size / 16}rem`, width: `${(size * 1250) / 1408 / 16}rem` }} />
+  <svg viewBox="0 0 1250 1408" className="brand-logo" style={{ height: `${size / 16}rem`, width: `${(size * 1250) / 1408 / 16}rem` }} aria-hidden="true">
+    <rect x="0" y="79" width="1250" height="1250" rx="300" fill="var(--ink)" />
+    <g fill="none" stroke="var(--bg)" strokeLinecap="round">
+      <path d="M370 959 A360 360 0 1 1 880 959" strokeWidth="110" />
+      <path className="brand-needle" d="M625 704 L816 513" strokeWidth="90" />
+    </g>
+    <circle cx="625" cy="704" r="85" fill="var(--bg)" />
+  </svg>
 );
 
 /** Profile photo, or the initials when there is none. */
@@ -79,31 +87,88 @@ export const IconPencil = () => (
   </svg>
 );
 
-export const IconOverview = () => (
-  <span style={{ display: 'grid', gridTemplateColumns: '0.375rem 0.375rem', gap: 2 }}>
-    {[0, 1, 2, 3].map((i) => (
-      <span key={i} style={{ width: '0.375rem', height: '0.375rem', borderRadius: 2, background: 'currentColor' }} />
-    ))}
-  </span>
-);
-
-export const IconFinance = () => (
-  <span style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: '0.875rem', width: '0.875rem' }}>
-    {[6, 14, 10].map((h, i) => (
-      <span key={i} style={{ width: '0.1875rem', height: h, borderRadius: 1, background: 'currentColor' }} />
-    ))}
-  </span>
-);
-
-export const IconProjects = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+const Svg = ({ children, size = 16 }: { children: ReactNode; size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {children}
   </svg>
 );
 
-export const IconData = () => (
-  <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, width: '0.875rem' }}>
-    <span style={{ width: '0.375rem', height: '0.375rem', borderRadius: '50%', background: 'currentColor' }} />
-    <span style={{ width: '0.75rem', height: '0.375rem', borderRadius: '6px 6px 2px 2px', background: 'currentColor' }} />
-  </span>
+export const IconOverview = () => (
+  <Svg>
+    <rect x="3" y="3" width="7" height="9" rx="1.5" />
+    <rect x="14" y="3" width="7" height="5" rx="1.5" />
+    <rect x="14" y="12" width="7" height="9" rx="1.5" />
+    <rect x="3" y="16" width="7" height="5" rx="1.5" />
+  </Svg>
 );
+
+export const IconProjects = () => (
+  <Svg>
+    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+  </Svg>
+);
+
+export const IconFinance = () => (
+  <Svg>
+    <path d="M3 3v18h18" />
+    <path d="m7 15 4-4 3 3 5-6" />
+  </Svg>
+);
+
+export const IconData = () => (
+  <Svg>
+    <circle cx="12" cy="8" r="4" />
+    <path d="M4 21a8 8 0 0 1 16 0" />
+  </Svg>
+);
+
+const IconSun = () => (
+  <Svg size={15}>
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+  </Svg>
+);
+const IconMoon = () => (
+  <Svg size={15}>
+    <path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11Z" />
+  </Svg>
+);
+const IconSystem = () => (
+  <Svg size={15}>
+    <rect x="2" y="4" width="20" height="13" rx="2" />
+    <path d="M8 21h8M12 17v4" />
+  </Svg>
+);
+
+const THEMES: [ThemePref, string, () => React.JSX.Element][] = [
+  ['light', 'Light', IconSun],
+  ['dark', 'Dark', IconMoon],
+  ['system', 'System', IconSystem],
+];
+const center = (e: React.MouseEvent) => {
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+};
+
+/** Light / Dark / System, with a sliding thumb. */
+export function ThemeSwitch({ pref, onChange }: { pref: ThemePref; onChange: (p: ThemePref, origin: { x: number; y: number }) => void }) {
+  const i = THEMES.findIndex(([v]) => v === pref);
+  return (
+    <div className="theme-switch" role="radiogroup" aria-label="Theme" style={{ '--i': i } as React.CSSProperties}>
+      {THEMES.map(([v, label, Icon]) => (
+        <button key={v} role="radio" aria-checked={pref === v} title={label} aria-label={label} onClick={(e) => onChange(v, center(e))}>
+          <Icon />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Compact version for phones: one button that toggles light and dark. */
+export function ThemeMini({ dark, onToggle }: { dark: boolean; onToggle: (origin: { x: number; y: number }) => void }) {
+  return (
+    <button className="theme-mini" onClick={(e) => onToggle(center(e))} aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}>
+      {dark ? <IconSun /> : <IconMoon />}
+    </button>
+  );
+}

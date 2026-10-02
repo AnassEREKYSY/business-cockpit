@@ -41,10 +41,10 @@ export default function FinancesPage({ data, update, goToData }: { data: AppData
   const revCount = inPeriod.filter((e) => e.type === 'revenue').length;
   const subCount = activeRec.filter((r) => r.type !== 'revenue').length;
   const kpis = [
-    { label: 'Revenue', value: m(T.rev), sub: `${revCount} ${revCount === 1 ? 'payment' : 'payments'} received`, color: 'var(--muted)', dot: '#2f6fde' },
-    { label: 'Expenses', value: m(T.charges), sub: T.rev ? `${pct((T.charges / T.rev) * 100)} of revenue` : 'No revenue in this period', color: 'var(--muted)', dot: '#f0a6aa' },
-    { label: 'Net profit', value: m(T.net), sub: T.rev ? `Net margin ${pct(T.netRate)}` : '—', color: T.rev ? tone(T.net) : 'var(--muted)', dot: '#2fa565' },
-    { label: 'Fixed costs / month', value: m(fixedCost), sub: `${subCount} active ${subCount === 1 ? 'subscription' : 'subscriptions'}${fixedRev ? ` · recurring income ${m(fixedRev)}` : ''}`, color: 'var(--muted)', dot: '#e9a23b' },
+    { label: 'Revenue', value: m(T.rev), sub: `${revCount} ${revCount === 1 ? 'payment' : 'payments'} received`, color: 'var(--muted)', dot: 'var(--c-rev)' },
+    { label: 'Expenses', value: m(T.charges), sub: T.rev ? `${pct((T.charges / T.rev) * 100)} of revenue` : 'No revenue in this period', color: 'var(--muted)', dot: 'var(--c-exp)' },
+    { label: 'Net profit', value: m(T.net), sub: T.rev ? `Net margin ${pct(T.netRate)}` : '—', color: T.rev ? tone(T.net) : 'var(--muted)', dot: 'var(--c-pos)' },
+    { label: 'Fixed costs / month', value: m(fixedCost), sub: `${subCount} active ${subCount === 1 ? 'subscription' : 'subscriptions'}${fixedRev ? ` · recurring income ${m(fixedRev)}` : ''}`, color: 'var(--muted)', dot: 'var(--c-warn)' },
   ];
 
   const cl = (x: number) => Math.max(0, Math.min(100, x)) + '%';
@@ -78,22 +78,22 @@ export default function FinancesPage({ data, update, goToData }: { data: AppData
   if (T.rev) {
     insights.push(
       T.net >= 0
-        ? { dot: '#2fa565', text: `You keep ${m(T.net)} out of ${m(T.rev)} in revenue, a net margin of ${pct(T.netRate)}.` }
-        : { dot: '#e0525a', text: `You're losing ${m(-T.net)} over this period: expenses exceed revenue by ${pct(-T.netRate)}.` },
+        ? { dot: 'var(--c-pos)', text: `You keep ${m(T.net)} out of ${m(T.rev)} in revenue, a net margin of ${pct(T.netRate)}.` }
+        : { dot: 'var(--c-neg)', text: `You're losing ${m(-T.net)} over this period: expenses exceed revenue by ${pct(-T.netRate)}.` },
     );
   }
   if (cats.length && T.rev) {
     const top = cats[0];
-    insights.push({ dot: '#e9a23b', text: `Your biggest expense: ${catLabel(top.name)}, ${m(top.amount)} (${pct((top.amount / T.rev) * 100)} of revenue).` });
+    insights.push({ dot: 'var(--c-warn)', text: `Your biggest expense: ${catLabel(top.name)}, ${m(top.amount)} (${pct((top.amount / T.rev) * 100)} of revenue).` });
   }
-  if (fixedCost) insights.push({ dot: '#e9a23b', text: `Your fixed costs are ${m(fixedCost)} a month, or ${m(fixedCost * 12)} a year, before any project.` });
+  if (fixedCost) insights.push({ dot: 'var(--c-warn)', text: `Your fixed costs are ${m(fixedCost)} a month, or ${m(fixedCost * 12)} a year, before any project.` });
   // Compare two complete months: the current one is still filling up.
   const [prev, last] = end === thisMonth ? chart.slice(-3, -1) : chart.slice(-2);
   if (prev.c && last.c) {
     const d = ((last.c - prev.c) / prev.c) * 100;
-    insights.push({ dot: d > 10 ? '#e9a23b' : '#2fa565', text: `Expenses in ${fmtMonth(last.k, true)} went ${d >= 0 ? 'up' : 'down'} ${pct(Math.abs(d))} compared with ${fmtMonth(prev.k, true)}.` });
+    insights.push({ dot: d > 10 ? 'var(--c-warn)' : 'var(--c-pos)', text: `Expenses in ${fmtMonth(last.k, true)} went ${d >= 0 ? 'up' : 'down'} ${pct(Math.abs(d))} compared with ${fmtMonth(prev.k, true)}.` });
   }
-  if (!insights.length) insights.push({ dot: '#9aa0ae', text: 'Add transactions or subscriptions in "Data & profile" to see your numbers.' });
+  if (!insights.length) insights.push({ dot: 'var(--faint)', text: 'Add transactions or subscriptions in "Data & profile" to see your numbers.' });
 
   const recent = [...inPeriod].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 7);
   const range = (from: string) =>
@@ -129,15 +129,15 @@ export default function FinancesPage({ data, update, goToData }: { data: AppData
           <div className="head">
             <div className="card-title">Revenue vs expenses, 6 months to {fmtMonth(end, true)}</div>
             <div className="legend">
-              <span><span className="dot" style={{ background: '#2f6fde' }} />Revenue</span>
-              <span><span className="dot" style={{ background: '#f0a6aa' }} />Expenses</span>
+              <span><span className="dot" style={{ background: 'var(--c-rev)' }} />Revenue</span>
+              <span><span className="dot" style={{ background: 'var(--c-exp)' }} />Expenses</span>
             </div>
           </div>
           <div className="bars">
             {chart.map((x) => (
               <div className="bar-pair" key={x.k} tabIndex={0} aria-label={`${fmtMonth(x.k, true)}: revenue ${m(x.r)}, expenses ${m(x.c)}`}>
-                <div style={{ height: `${(x.r / max) * 100}%`, background: '#2f6fde' }} />
-                <div style={{ height: `${(x.c / max) * 100}%`, background: '#f0a6aa' }} />
+                <div style={{ height: `${(x.r / max) * 100}%`, background: 'var(--c-rev)' }} />
+                <div style={{ height: `${(x.c / max) * 100}%`, background: 'var(--c-exp)' }} />
                 <span className="bar-tip">Revenue {m(x.r)} · Expenses {m(x.c)}</span>
               </div>
             ))}
@@ -157,14 +157,14 @@ export default function FinancesPage({ data, update, goToData }: { data: AppData
         <div className="card">
           <div className="card-title">Where each {cur === 'EUR' ? 'euro' : 'unit'} of revenue goes</div>
           <div className="split">
-            <div style={{ width: cl(share(T.direct)), background: '#e9a23b' }} />
-            <div style={{ width: cl(share(T.opex)), background: '#f0a6aa' }} />
-            <div style={{ width: cl(T.netRate), background: '#2fa565' }} />
+            <div style={{ width: cl(share(T.direct)), background: 'var(--c-warn)' }} />
+            <div style={{ width: cl(share(T.opex)), background: 'var(--c-exp)' }} />
+            <div style={{ width: cl(T.netRate), background: 'var(--c-pos)' }} />
           </div>
           <div className="section" style={{ gap: '0.625rem' }}>
-            <div className="split-row"><span><span className="dot" style={{ background: '#e9a23b' }} />Direct costs (subcontracting…)</span><span>{pct(share(T.direct))}</span></div>
-            <div className="split-row"><span><span className="dot" style={{ background: '#f0a6aa' }} />Operating expenses</span><span>{pct(share(T.opex))}</span></div>
-            <div className="split-row"><span><span className="dot" style={{ background: '#2fa565' }} />Net profit</span><span>{pct(T.netRate)}</span></div>
+            <div className="split-row"><span><span className="dot" style={{ background: 'var(--c-warn)' }} />Direct costs (subcontracting…)</span><span>{pct(share(T.direct))}</span></div>
+            <div className="split-row"><span><span className="dot" style={{ background: 'var(--c-exp)' }} />Operating expenses</span><span>{pct(share(T.opex))}</span></div>
+            <div className="split-row"><span><span className="dot" style={{ background: 'var(--c-pos)' }} />Net profit</span><span>{pct(T.netRate)}</span></div>
           </div>
           <div className="insights">
             {insights.map((i) => (
@@ -182,7 +182,7 @@ export default function FinancesPage({ data, update, goToData }: { data: AppData
           </div>
           {cats.map((c) => {
             const p = share(c.amount);
-            const color = '#2f6fde';
+            const color = 'var(--c-rev)';
             return (
               <div className="catbar" key={c.name}>
                 <div className="catbar-top">
