@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DatePicker } from '../components/Calendar';
 import { CAT, Donut, HBars, LineChart, compactMoney } from '../components/Charts';
 import { Select } from '../components/Select';
@@ -12,7 +12,7 @@ import { isDay } from '../lib/store';
 import { locale, t, tn } from '../lib/i18n';
 import { removeAsset, removeProperty, removeRow } from '../lib/undo';
 import {
-  ACCOUNTS, KINDS, convert, fxRates, holdings, kindLabel, propertyStats, rangeFor, totalsOf, valueSeries, type Fx, type Holding,
+  ACCOUNTS, KINDS, convert, fxRates, holdings, kindLabel, position, propertyStats, rangeFor, totalsOf, valueSeries, type Fx, type Holding,
 } from '../lib/wealth';
 import type { AccountKey, AppData, Asset, AssetKind, Property, PropertyEntry, Trade } from '../types';
 
@@ -325,7 +325,7 @@ function Account({ data, update, account, quotes, fx }: { data: AppData; update:
             </div>
             <div className="table-wrap">
               <div className="trow th t-hold">
-                <span>{t('Asset')}</span><span className="r">{t('Quantity')}</span><span className="r">{t('Avg. cost')}</span><span className="r">{t('Price')}</span>
+                <span>{t('Asset')}</span><span className="r">{t('Quantity')}</span><span className="r">{t('Invested')}</span><span className="r">{t('Price')}</span>
                 <span className="r">{t('Value')}</span><span className="r">{t('Gain')}</span><span className="r">{t('Weight')}</span><span />
               </div>
               {held.map((h) => <HoldingRow key={h.asset.id} h={h} total={tot.value} cur={cur} fx={fx} onClick={() => setEditing(h.asset)} onDelete={() => deleteAsset(h.asset)} />)}
@@ -357,7 +357,10 @@ function HoldingRow({ h, total, cur, fx, onClick, onDelete }: { h: Holding; tota
         </span>
       </span>
       <span className="r">{fmtQty(h.qty)}</span>
-      <span className="r" style={{ color: 'var(--ink-2)' }}>{h.qty ? fmtPrice(h.cost / h.qty, c) : '—'}</span>
+      <span className="r">
+        {h.cost ? fmtMoney(h.cost, c) : '—'}
+        {h.qty > 0 && <span className="small" style={{ display: 'block' }}>{t('avg. {price}', { price: fmtPrice(h.cost / h.qty, c) })}</span>}
+      </span>
       <span className="r">{h.price ? fmtPrice(h.price, c) : '—'}{h.live && <span className="live-dot small-dot" title={t('Live price')} />}</span>
       <b className="r">{fmtMoney(h.value, c)}</b>
       <span className="r" style={{ color: tone(h.gain), fontWeight: 600 }}>
@@ -406,20 +409,37 @@ function AssetModal({ asset, data, update, quotes, onClose }: { asset: Asset; da
   const priceValue = price.trim() ? parseNum(price) : 0;
   const live = f.symbol ? quotes[f.symbol] : undefined;
 
-  const search = async () => {
-    const query = q.trim() || f.isin || f.name;
+  const lastQuery = useRef('');
+  const search = useCallback(async (raw?: string) => {
+    const query = (raw ?? q).trim();
     if (!query) return;
+    lastQuery.current = query;
     setSearching(true);
     setSearchError('');
     try {
-      setHits(await searchSymbols(query));
+      const found = await searchSymbols(query);
+      if (lastQuery.current === query) setHits(found); // an older, slower answer never replaces a newer one
     } catch {
-      setHits([]);
-      setSearchError(t('Search is unavailable right now (it works once the site is online on Vercel). You can type the symbol yourself.'));
+      if (lastQuery.current === query) {
+        setHits([]);
+        setSearchError(t('Search is unavailable right now (it works once the site is online on Vercel). You can type the symbol yourself.'));
+      }
     } finally {
-      setSearching(false);
+      if (lastQuery.current === query) setSearching(false);
     }
-  };
+  }, [q]);
+  // Search while typing: waits for a short pause, from 2 characters.
+  useEffect(() => {
+    const query = q.trim();
+    if (query.length < 2) {
+      lastQuery.current = '';
+      setHits(null);
+      setSearching(false);
+      return;
+    }
+    const id = window.setTimeout(() => void search(query), 350);
+    return () => window.clearTimeout(id);
+  }, [q, search]);
   const pick = async (h: SymbolHit) => {
     const kind: AssetKind = h.type === 'ETF' ? 'etf' : h.type === 'CRYPTOCURRENCY' ? 'crypto' : h.type === 'MUTUALFUND' ? 'opcvm' : h.type === 'EQUITY' ? 'stock' : f.kind;
     setF({ ...f, symbol: h.symbol, name: f.name || h.name, kind });
@@ -464,9 +484,9 @@ function AssetModal({ asset, data, update, quotes, onClose }: { asset: Asset; da
             <div className="row" style={{ gap: '0.5rem', flexWrap: 'nowrap' }}>
               <label className="search" style={{ maxWidth: 'none' }}>
                 <IconSearch />
-                <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), void search())} placeholder={t('Search by name, ticker or ISIN (e.g. IE00BK5BQT80)')} aria-label={t('Search a market symbol')} />
+                <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), void search(q || f.isin || f.name))} autoFocus={creating} placeholder={t('Type a name, ticker or ISIN (e.g. Bitcoin, VWCE, IE00BK5BQT80)')} aria-label={t('Search a market symbol')} />
               </label>
-              <button type="button" className="btn sm outline" onClick={() => void search()} disabled={searching}>{searching ? t('Searching…') : t('Search')}</button>
+              {searching && <span className="small search-spin">{t('Searching…')}</span>}
             </div>
             {hits && (
               <div className="etf-hits">
@@ -476,7 +496,7 @@ function AssetModal({ asset, data, update, quotes, onClose }: { asset: Asset; da
                     <span className="small">{h.symbol} · {h.type} · {h.exchange}</span>
                   </button>
                 ))}
-                {hits.length === 0 && !searchError && <div className="small">{t('Nothing found. Try the ISIN or the ticker.')}</div>}
+                {hits.length === 0 && !searchError && !searching && <div className="small">{t('Nothing found. Try the ISIN or the ticker.')}</div>}
               </div>
             )}
             {searchError && <div className="small" style={{ color: 'var(--amber)' }}>{searchError}</div>}
@@ -517,24 +537,51 @@ function Operations({ asset, trades, data, update }: { asset: Asset; trades: Tra
   const [date, setDate] = useState(isoDate());
   const [qty, setQty] = useState('');
   const [price, setPrice] = useState(asset.price ? String(asset.price) : '');
+  const [amount, setAmount] = useState('');
   const [fees, setFees] = useState('');
   const toast = useToast();
   const c = asset.currency;
-  const q = side === 'dividend' ? 0 : parseNum(qty);
-  const p = parseNum(price);
   const fe = fees.trim() ? parseNum(fees) : 0;
-  const valid = isDay(date) && p !== null && p > 0 && fe !== null && (side === 'dividend' || (q !== null && q > 0));
+  // Fill any two of quantity, price per unit and amount: the third is worked out.
+  // "I put 100 € in Bitcoin" = amount (+ price) · "I bought 0.0015 BTC for 100 €" = quantity + amount.
+  const qIn = qty.trim() ? parseNum(qty) : undefined;
+  const pIn = price.trim() ? parseNum(price) : undefined;
+  const aIn = amount.trim() ? parseNum(amount) : undefined;
+  let q: number | null = null;
+  let p: number | null = null;
+  let derived: 'qty' | 'price' | 'amount' | null = null;
+  if (side === 'dividend') {
+    q = 0;
+    p = aIn ?? pIn ?? null;
+  } else if (aIn && qIn) {
+    q = qIn;
+    p = aIn / qIn;
+    derived = 'price';
+  } else if (aIn && pIn) {
+    q = aIn / pIn;
+    p = pIn;
+    derived = 'qty';
+  } else if (qIn && pIn) {
+    q = qIn;
+    p = pIn;
+    derived = 'amount';
+  }
+  const bad = qIn === null || pIn === null || aIn === null || fe === null;
+  const valid = !bad && isDay(date) && p !== null && p > 0 && (side === 'dividend' || (q !== null && q > 0));
   const held = trades.reduce((a, x) => a + (x.side === 'buy' ? x.quantity : x.side === 'sell' ? -x.quantity : 0), 0);
+  const pos = position([...trades].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id)));
+  const round = (n: number, d: number) => Math.round(n * 10 ** d) / 10 ** d;
 
   const add = () => {
     if (!valid || p === null || fe === null) return;
-    const tr: Trade = { id: uid(), assetId: asset.id, date, side, quantity: side === 'dividend' ? 0 : q ?? 0, price: p, fees: fe };
+    const tr: Trade = { id: uid(), assetId: asset.id, date, side, quantity: side === 'dividend' ? 0 : round(q ?? 0, 10), price: round(p, 8), fees: fe };
     update((d) => ({ ...d, trades: [...d.trades, tr].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id)) }));
     const total = side === 'dividend' ? p : (q ?? 0) * p;
     toast(<>{side === 'buy' ? t('Buy logged:') : side === 'sell' ? t('Sell logged:') : t('Dividend logged:')} <b>{fmtMoney(total, c)}</b></>, {
       undo: () => update((d) => ({ ...d, trades: d.trades.filter((x) => x.id !== tr.id) })),
     });
     setQty('');
+    setAmount('');
     setFees('');
   };
   const remove = (tr: Trade) => {
@@ -552,18 +599,30 @@ function Operations({ asset, trades, data, update }: { asset: Asset; trades: Tra
     <div className="ops">
       <div className="checklist-head">
         <span className="card-title">{t('Operations')}</span>
-        <span className="small">{t('{qty} held', { qty: fmtQty(held) })} · {tn(trades.length, '{n} operation', '{n} operations')}</span>
+        <span className="small">{t('{qty} held', { qty: fmtQty(held) })}{pos.cost ? ` · ${t('{amount} invested', { amount: fmtMoney(pos.cost, c) })}` : ''} · {tn(trades.length, '{n} operation', '{n} operations')}</span>
       </div>
       <form className="op-form" onSubmit={(e) => { e.preventDefault(); add(); }}>
         <Seg label={t('Operation')} value={side} onChange={setSide} options={SIDE_OPTIONS.map((o) => [o.value, t(o.label)] as [Trade['side'], string])} />
         <div className="op-fields">
           <div className="op-date"><DatePicker value={date} onChange={setDate} clearable={false} size="sm" ariaLabel={t('Date')} /></div>
-          {side !== 'dividend' && <input className="input" inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} placeholder={t('Quantity')} aria-label={t('Quantity')} />}
-          <input className="input" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} placeholder={side === 'dividend' ? t('Amount ({currency})', { currency: c }) : t('Price per unit ({currency})', { currency: c })} aria-label={t('Price')} />
+          {side !== 'dividend' && (
+            <>
+              <input className={'input' + (derived === 'qty' ? ' is-derived' : '')} inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} placeholder={derived === 'qty' && q ? `= ${fmtQty(q)}` : t('Quantity')} aria-label={t('Quantity')} />
+              <input className={'input' + (derived === 'price' ? ' is-derived' : '')} inputMode="decimal" value={derived === 'price' ? '' : price} onChange={(e) => setPrice(e.target.value)} placeholder={derived === 'price' && p ? `= ${fmtPrice(p, c)}` : t('Price per unit ({currency})', { currency: c })} aria-label={t('Price per unit')} title={derived === 'price' ? t('Worked out from the amount and the quantity') : undefined} />
+            </>
+          )}
+          <input className={'input' + (derived === 'amount' ? ' is-derived' : '')} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={side === 'dividend' ? t('Amount ({currency})', { currency: c }) : derived === 'amount' && q && p ? `= ${fmtMoney(q * p, c)}` : side === 'buy' ? t('Amount invested ({currency})', { currency: c }) : t('Amount received ({currency})', { currency: c })} aria-label={t('Amount')} />
           <input className="input" inputMode="decimal" value={fees} onChange={(e) => setFees(e.target.value)} placeholder={t('Fees')} aria-label={t('Fees')} />
           <button className="btn sm" type="submit" disabled={!valid}>{t('Add')}</button>
         </div>
-        {side !== 'dividend' && q && p ? <div className="small">{t('Total {amount}', { amount: fmtMoney(q * p + (side === 'buy' ? fe ?? 0 : -(fe ?? 0)), c) })}</div> : null}
+        {side !== 'dividend' && q && p ? (
+          <div className="small">
+            {t('{qty} at {price}', { qty: fmtQty(q), price: fmtPrice(p, c) })} · {t('Total {amount}', { amount: fmtMoney(q * p + (side === 'buy' ? fe ?? 0 : -(fe ?? 0)), c) })}{fe ? ` (${t('fees included')})` : ''}
+          </div>
+        ) : side !== 'dividend' ? (
+          <div className="small">{t('Fill any two of quantity, price and amount: the third is worked out.')}</div>
+        ) : null}
+        {bad && <div className="small form-error">{t('Invalid number. Examples: 0.0015 · 1 250,50 · 100')}</div>}
       </form>
       {!asset.symbol && data.assetPrices.some((x) => x.assetId === asset.id) && (
         <details className="price-history">
@@ -589,7 +648,7 @@ function Operations({ asset, trades, data, update }: { asset: Asset; trades: Tra
             <button className="x" onClick={() => remove(tr)} aria-label={t('Delete operation')}>×</button>
           </div>
         ))}
-        {trades.length === 0 && <div className="empty">{t('Log your first buy: date, quantity and price per unit.')}</div>}
+        {trades.length === 0 && <div className="empty">{t('Log your first buy: the amount you invested, with the quantity or the price per unit.')}</div>}
       </div>
     </div>
   );

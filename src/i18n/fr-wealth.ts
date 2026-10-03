@@ -257,5 +257,18 @@ const fr: Record<string, string> = {
   'Number of shares, occupancy, exit date…': 'Nombre de parts, taux d’occupation, date de sortie…',
   '{n} share': '{n} part',
   '{n} shares': '{n} parts',
+  // Search while typing, amount invested
+  'avg. {price}': 'PRU {price}',
+  'Type a name, ticker or ISIN (e.g. Bitcoin, VWCE, IE00BK5BQT80)': 'Tapez un nom, un ticker ou un ISIN (ex. Bitcoin, VWCE, IE00BK5BQT80)',
+  '{amount} invested': '{amount} investis',
+  'Price per unit': 'Prix unitaire',
+  'Worked out from the amount and the quantity': 'Calculé à partir du montant et de la quantité',
+  'Amount invested ({currency})': 'Montant investi ({currency})',
+  'Amount received ({currency})': 'Montant reçu ({currency})',
+  '{qty} at {price}': '{qty} à {price}',
+  'fees included': 'frais inclus',
+  'Fill any two of quantity, price and amount: the third is worked out.': 'Renseignez deux valeurs parmi quantité, prix et montant : la troisième est calculée.',
+  'Invalid number. Examples: 0.0015 · 1 250,50 · 100': 'Nombre invalide. Exemples : 0,0015 · 1 250,50 · 100',
+  'Log your first buy: the amount you invested, with the quantity or the price per unit.': 'Enregistrez votre premier achat : le montant investi, avec la quantité ou le prix unitaire.',
 };
 export default fr;
