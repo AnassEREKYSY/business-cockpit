@@ -16,7 +16,7 @@ export const TAX_PRESETS: Record<Exclude<TaxActivity, 'custom'>, { label: string
 
 /** Started in April 2026 with ACRE (50 %, to 31 March 2027) and the versement libératoire. */
 export const DEFAULT_TAX: TaxSettings = {
-  activity: 'bic_services', start: '2026-04-01', acreUntil: '2027-03-31', ...pick(TAX_PRESETS.bic_services),
+  activity: 'bic_services', start: '2026-04-01', acreUntil: '2027-03-31', ...pick(TAX_PRESETS.bic_services), period: 'quarter', firstEnd: '',
 };
 
 function pick(p: { social: number; acre: number; cfp: number; vl: number }) {

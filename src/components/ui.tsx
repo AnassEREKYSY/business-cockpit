@@ -206,6 +206,15 @@ export const IconClients = () => (
     <path d="M16 4.5a3.5 3.5 0 0 1 0 7M18.5 14a6.5 6.5 0 0 1 3 6" />
   </Svg>
 );
+export const IconTax = () => (
+  <Svg>
+    <path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" />
+    <path d="M9.5 14.5l5-5" />
+    <circle cx="9.75" cy="9.75" r="0.6" />
+    <circle cx="14.25" cy="14.25" r="0.6" />
+  </Svg>
+);
+
 export const IconRepeat = () => (
   <Svg>
     <path d="M17 2l3 3-3 3" />

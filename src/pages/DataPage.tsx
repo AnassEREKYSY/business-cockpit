@@ -1,12 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { ColorPicker } from '../components/ColorPicker';
 import { EntryModal, RecurringModal, catOptions, freqOptions, typeOptions } from '../components/MoneyForms';
 import { useConfirm } from '../components/Confirm';
 import { useToast } from '../components/Toast';
 import { ClientModal } from '../components/ClientModal';
 import { isOverdue } from '../lib/stats';
-import { TAX_PRESETS, acreEnd, isTaxable, rateOn, taxOf, taxesOn } from '../lib/tax';
-import type { TaxSettings } from '../types';
+import { isTaxable, taxOf } from '../lib/tax';
 import { removeClient, removeRow } from '../lib/undo';
 import { DatePicker } from '../components/Calendar';
 import { ClientSelect, ProjectSelect } from '../components/pickers';
@@ -14,8 +13,8 @@ import { Select } from '../components/Select';
 import { Avatar, Field, IconPencil, Seg } from '../components/ui';
 import { nextColor } from '../lib/colors';
 import { CATEGORIES, CURRENCIES, LOCALE, TYPE_META, catLabel, soft } from '../lib/constants';
-import { allTxns, isActive, isFuture, monthlyEquivalent, parseAmount } from '../lib/finance';
-import { fmtDate, isoDate, money, pct, uid } from '../lib/format';
+import { isActive, isFuture, monthlyEquivalent, parseAmount } from '../lib/finance';
+import { fmtDate, isoDate, money, uid } from '../lib/format';
 import { demoData, isDay, normalize } from '../lib/store';
 import type { Account } from '../App';
 import type { AppData, Client, Entry, EntryType, Recurring } from '../types';
@@ -179,7 +178,7 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
     const before = data;
     update((d) => ({
       ...d, clients: [], projects: [], tasks: [], entries: [], recurring: [], notes: [], investments: [], timeEntries: [],
-      assets: [], trades: [], assetPrices: [], properties: [], propertyEntries: [], subscriptions: [],
+      assets: [], trades: [], assetPrices: [], properties: [], propertyEntries: [], subscriptions: [], taxPayments: [],
     }));
     toast(t('Everything cleared'), { undo: () => update(() => before) });
   };
@@ -264,7 +263,13 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
         </div>
       </div>
 
-      <TaxCard tax={P.tax} currency={P.currency} data={data} onChange={(tax) => update((d) => ({ ...d, profile: { ...d.profile, tax } }))} />
+      <div className="card row" style={{ justifyContent: 'space-between', gap: '0.75rem' }}>
+        <div>
+          <div className="card-title">{t('Taxes · micro-entreprise')}</div>
+          <div className="small">{t('Rates, ACRE and URSSAF payments are in the Taxes tab.')}</div>
+        </div>
+        <a className="btn sm outline" href="#/taxes">{t('Open Taxes')}</a>
+      </div>
 
       <Clients data={data} update={update} />
 
@@ -410,108 +415,6 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
       {editingRec && <RecurringModal item={editingRec} data={data} update={update} onClose={() => setEditingRec(null)} />}
       {editingEntry && <EntryModal entry={editingEntry} data={data} update={update} onClose={() => setEditingEntry(null)} />}
     </section>
-  );
-}
-
-/* ---------------- Taxes ---------------- */
-
-// A function, not a constant: the labels follow the current language.
-const activityOptions = () => [
-  ...(Object.keys(TAX_PRESETS) as (keyof typeof TAX_PRESETS)[]).map((k) => ({ value: k as TaxSettings['activity'], label: t(TAX_PRESETS[k].label) })),
-  { value: 'custom' as const, label: t('Custom rates') },
-];
-
-function RateInput({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
-  const [raw, setRaw] = useState(String(value));
-  useEffect(() => setRaw(String(value)), [value]);
-  return (
-    <Field label={label}>
-      <span className="pct-input">
-        <input
-          className="input"
-          inputMode="decimal"
-          value={raw}
-          onChange={(e) => setRaw(e.target.value)}
-          onBlur={() => {
-            const n = Number(raw.replace(',', '.'));
-            if (Number.isFinite(n) && n >= 0 && n <= 100) onChange(Math.round(n * 1000) / 1000);
-            else setRaw(String(value));
-          }}
-          onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-        />
-        <span>%</span>
-      </span>
-    </Field>
-  );
-}
-
-function TaxCard({ tax, currency, data, onChange }: { tax: TaxSettings; currency: string; data: AppData; onChange: (t: TaxSettings) => void }) {
-  const today = isoDate();
-  const now = rateOn(tax, today);
-  const after = { ...tax, acreUntil: '' };
-  const later = rateOn(after, today);
-  const year = String(new Date().getFullYear());
-  const yearTax = taxesOn(allTxns(data).filter((e) => e.date.startsWith(year)), tax);
-  const set = (patch: Partial<TaxSettings>) => onChange({ ...tax, ...patch, activity: patch.activity ?? ('social' in patch || 'acre' in patch || 'cfp' in patch || 'vl' in patch ? 'custom' : tax.activity) });
-  const pickActivity = (activity: TaxSettings['activity']) => {
-    if (activity === 'custom') return onChange({ ...tax, activity });
-    const p = TAX_PRESETS[activity];
-    onChange({ ...tax, activity, social: p.social, acre: p.acre, cfp: p.cfp, vl: tax.vl ? p.vl : 0 });
-  };
-  return (
-    <div className="card" style={{ gap: '0.875rem' }}>
-      <div className="head">
-        <div>
-          <div className="card-title">{t('Taxes · micro-entreprise')}</div>
-          <div className="small">{t('Used to show gross and net revenue everywhere. Rates are 2026 values: check them each January, and when ACRE ends.')}</div>
-        </div>
-        <div className="tax-now">
-          <span className="small">{t('Today')}</span>
-          <b>{pct(now.total)}</b>
-          {now.acre ? <span className="pay-chip waiting">ACRE</span> : null}
-        </div>
-      </div>
-      <div className="form-grid">
-        <Field label={t('Activity')}>
-          <Select value={tax.activity} onChange={pickActivity} options={activityOptions()} ariaLabel={t('Activity')} />
-        </Field>
-        <Field label={t('Business started')}>
-          <DatePicker value={tax.start} onChange={(start) => onChange({ ...tax, start, acreUntil: tax.acreUntil ? acreEnd(start) || tax.acreUntil : '' })} placeholder={t('Unknown')} ariaLabel={t('Business started')} />
-        </Field>
-        <Field label={t('ACRE until')}>
-          <DatePicker value={tax.acreUntil} onChange={(acreUntil) => onChange({ ...tax, acreUntil })} placeholder={t('No ACRE')} ariaLabel={t('ACRE until')} />
-        </Field>
-        <Field label={t('Versement libératoire')}>
-          <Seg label={t('Versement libératoire')} value={tax.vl > 0 ? 'yes' : 'no'} onChange={(v) => set({ vl: v === 'yes' ? (tax.activity !== 'custom' ? TAX_PRESETS[tax.activity].vl : 1.7) : 0, activity: tax.activity })} options={[['yes', t('Yes')], ['no', t('No')]]} />
-        </Field>
-      </div>
-      <div className="form-grid">
-        <RateInput label={t('Social contributions')} value={tax.social} onChange={(social) => set({ social })} />
-        <RateInput label={t('Social, during ACRE')} value={tax.acre} onChange={(acre) => set({ acre })} />
-        <RateInput label={t('Training (CFP)')} value={tax.cfp} onChange={(cfp) => set({ cfp })} />
-        <RateInput label={t('Income tax (VL)')} value={tax.vl} onChange={(vl) => set({ vl })} />
-      </div>
-      <div className="tax-summary">
-        <div>
-          <span className="small">{now.acre ? t('Now, with ACRE (until {date})', { date: fmtDate(tax.acreUntil) }) : t('Now')}</span>
-          <b>{pct(now.total)}</b>
-          <span className="small">{t('{social} URSSAF + {cfp} CFP', { social: pct(now.social), cfp: pct(now.cfp) })}{tax.vl ? ' + ' + t('{p} income tax', { p: pct(now.vl) }) : ''}</span>
-        </div>
-        {now.acre && (
-          <div>
-            <span className="small">{t('After ACRE')}</span>
-            <b>{pct(later.total)}</b>
-            <span className="small">{t('{social} URSSAF + {cfp} CFP', { social: pct(later.social), cfp: pct(later.cfp) })}{tax.vl ? ' + ' + t('{p} income tax', { p: pct(later.vl) }) : ''}</span>
-          </div>
-        )}
-        <div>
-          <span className="small">{t('This year so far')}</span>
-          <b>{money(yearTax.total, currency)}</b>
-          <span className="small">{t('on {gross} gross · {net} net', { gross: money(yearTax.gross, currency), net: money(yearTax.net, currency) })}</span>
-        </div>
-      </div>
-      <div className="small">{t('Trading, investment and real estate income are not business turnover: no contributions are counted on them.')}</div>
-    </div>
   );
 }
 

@@ -3,7 +3,7 @@ import { EntryModal, newEntry } from './components/MoneyForms';
 import { Palette, type Command } from './components/Palette';
 import { TaskModal, newTask } from './components/TaskModal';
 import { useToast } from './components/Toast';
-import { Avatar, BrandMark, IconClients, IconData, IconFinance, IconOverview, IconPlus, IconProjects, IconSearch, IconStop, IconWealth, IconRepeat, ThemeMini, ThemeSwitch } from './components/ui';
+import { Avatar, BrandMark, IconClients, IconData, IconFinance, IconOverview, IconPlus, IconProjects, IconSearch, IconStop, IconWealth, IconRepeat, IconTax, ThemeMini, ThemeSwitch } from './components/ui';
 import { SCHEMA_OUTDATED } from './lib/remote';
 import { unpaidInvoices } from './lib/stats';
 import { resolved, useTheme, type ThemePref } from './lib/theme';
@@ -23,10 +23,11 @@ import ProjectsPage from './pages/ProjectsPage';
 import ClientsPage from './pages/ClientsPage';
 import WealthPage from './pages/WealthPage';
 import SubscriptionsPage from './pages/SubscriptionsPage';
+import TaxesPage from './pages/TaxesPage';
 import { ProjectModal, newProject } from './pages/OverviewPage';
 import { money } from './lib/format';
 
-export type Page = 'overview' | 'projects' | 'clients' | 'fin' | 'subs' | 'wealth' | 'data';
+export type Page = 'overview' | 'projects' | 'clients' | 'fin' | 'taxes' | 'subs' | 'wealth' | 'data';
 export type Account = { email: string; signOut: () => void };
 
 const PAGES: { key: Page; hash: string; label: string; short?: string; Icon: () => React.JSX.Element }[] = [
@@ -34,6 +35,7 @@ const PAGES: { key: Page; hash: string; label: string; short?: string; Icon: () 
   { key: 'projects', hash: 'projects', label: 'Projects', Icon: IconProjects },
   { key: 'clients', hash: 'clients', label: 'Clients', Icon: IconClients },
   { key: 'fin', hash: 'finances', label: 'Finances', Icon: IconFinance },
+  { key: 'taxes', hash: 'taxes', label: 'Taxes', Icon: IconTax },
   { key: 'subs', hash: 'subscriptions', label: 'Subscriptions', short: 'Subs', Icon: IconRepeat },
   { key: 'wealth', hash: 'wealth', label: 'Wealth', Icon: IconWealth },
   { key: 'data', hash: 'data', label: 'Data & profile', short: 'Profile', Icon: IconData },
@@ -128,7 +130,7 @@ export default function App({ repo, account }: { repo: Repository; account?: Acc
       const k = e.key.toLowerCase();
       if (Date.now() - keys.current.g < 900) {
         keys.current.g = 0;
-        const to = ({ o: 'overview', p: 'projects', c: 'clients', f: 'fin', s: 'subs', w: 'wealth', d: 'data' } as Record<string, Page>)[k];
+        const to = ({ o: 'overview', p: 'projects', c: 'clients', f: 'fin', t: 'taxes', s: 'subs', w: 'wealth', d: 'data' } as Record<string, Page>)[k];
         if (to) go(to);
         return;
       }
@@ -207,7 +209,7 @@ export default function App({ repo, account }: { repo: Repository; account?: Acc
       : []),
     { id: 'search-tasks', group: t('Actions'), label: t('Search tasks on the board'), hint: '/', icon: <IconSearch size={14} />, keywords: 'filter find', run: searchTasks },
     { id: 'theme', group: t('Actions'), label: dark ? t('Switch to light theme') : t('Switch to dark theme'), icon: <span className="palette-theme" />, keywords: 'theme dark light mode black white', run: () => setTheme(dark ? 'light' : 'dark') },
-    ...PAGES.map(({ key, label, Icon }) => ({ id: 'go-' + key, group: t('Go to'), label: t(label), hint: 'G ' + { overview: 'O', projects: 'P', clients: 'C', fin: 'F', subs: 'S', wealth: 'W', data: 'D' }[key], icon: <Icon />, run: () => go(key) })),
+    ...PAGES.map(({ key, label, Icon }) => ({ id: 'go-' + key, group: t('Go to'), label: t(label), hint: 'G ' + { overview: 'O', projects: 'P', clients: 'C', fin: 'F', taxes: 'T', subs: 'S', wealth: 'W', data: 'D' }[key], icon: <Icon />, run: () => go(key) })),
     ...data.projects
       .filter((p) => p.status !== 'Done')
       .slice(0, 5)
@@ -328,13 +330,14 @@ export default function App({ repo, account }: { repo: Repository; account?: Acc
         )}
         {page === 'fin' && <FinancesPage data={data} update={update} openProject={openProject} goToData={() => setPage('data')} />}
         {page === 'clients' && <ClientsPage data={data} update={update} openProject={openProject} />}
+        {page === 'taxes' && <TaxesPage data={data} update={update} />}
         {page === 'subs' && <SubscriptionsPage data={data} update={update} />}
         {page === 'wealth' && <WealthPage data={data} update={update} />}
         {page === 'data' && <DataPage data={data} update={update} account={session} />}
         </div>
       </main>
 
-      <nav className="tabbar">{nav}</nav>
+      <nav className="tabbar">{nav.filter((n) => n.key !== 'data')}</nav>
       {palette && <Palette commands={commands} onClose={() => setPalette(false)} />}
       {modal?.task && <TaskModal task={modal.task} data={data} update={update} onClose={() => setModal(null)} />}
       {modal?.project && <ProjectModal project={modal.project} data={data} update={update} onClose={() => setModal(null)} onCreated={openProject} />}

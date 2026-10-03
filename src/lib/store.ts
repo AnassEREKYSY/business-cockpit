@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AppData, Asset, AssetPrice, CheckItem, Client, Contact, Entry, Investment, Note, Priority, Property, PropertyEntry, Recurring, SubCycle, Subscription, Task, TaxSettings, TimeEntry, Trade } from '../types';
+import type { AppData, Asset, AssetPrice, CheckItem, Client, Contact, Entry, Investment, Note, Priority, Property, PropertyEntry, Recurring, SubCycle, Subscription, Task, TaxPayment, TaxSettings, TimeEntry, Trade } from '../types';
 import { DEFAULT_TAX } from './tax';
+import { periodRows } from './urssaf';
 import { isHex, nextColor } from './colors';
 import { COLUMNS, LOCALE, NOTE_KINDS, PROJECT_STATUSES, catLabel } from './constants';
 import { isoDate, monthsAgo, uid } from './format';
@@ -81,6 +82,7 @@ export function emptyData(): AppData {
     properties: [],
     propertyEntries: [],
     subscriptions: [],
+    taxPayments: [],
   };
 }
 
@@ -123,6 +125,7 @@ function taxSettings(v: unknown): TaxSettings {
     start: t.start === '' ? '' : isDay(t.start) ? t.start : d.start,
     acreUntil: t.acreUntil === '' ? '' : isDay(t.acreUntil) ? t.acreUntil : d.acreUntil,
     social: rate(t.social, d.social), acre: rate(t.acre, d.acre), cfp: rate(t.cfp, d.cfp), vl: rate(t.vl, d.vl),
+    period: t.period === 'month' ? 'month' : 'quarter', firstEnd: isDay(t.firstEnd) ? (t.firstEnd as string) : '',
   };
 }
 const contacts = (v: unknown): Contact[] =>
@@ -259,6 +262,13 @@ export function normalize(d: Partial<AppData>): AppData {
     timeEntries: normTime(d.timeEntries ?? [], pid, new Set((d.tasks ?? []).map((t) => t.id))),
     ...normWealth(d),
     subscriptions: normSubs(d.subscriptions ?? []),
+    taxPayments: (d.taxPayments ?? [])
+      .filter((x) => x && isDay(x.periodStart) && isDay(x.periodEnd))
+      .map((x): TaxPayment => ({
+        id: idOf(x.id), periodStart: x.periodStart, periodEnd: x.periodEnd, revenue: amount(x.revenue), amount: amount(x.amount),
+        paidOn: day(x.paidOn), notes: text(x.notes),
+      }))
+      .sort((a, b) => a.periodEnd.localeCompare(b.periodEnd) || a.id.localeCompare(b.id)),
   };
 }
 
@@ -430,8 +440,9 @@ export function demoData(profile: AppData['profile']): AppData {
   const t1 = uid();
   const t3 = uid();
   const start = m(5, 1);
-  return {
+  const demo: AppData = {
     profile,
+    taxPayments: [],
     clients: [
       { id: c2, name: 'Northside Studio', color: '#8b6fe8', notes: '', contacts: [] },
       { id: c3, name: 'Physio Plus', color: '#22a6c9', notes: '', contacts: [] },
@@ -474,6 +485,14 @@ export function demoData(profile: AppData['profile']): AppData {
       { id: uid(), label: 'Business bank account', type: 'opex', category: 'Bank fees', amount: 45, frequency: 'monthly', start, end: '', projectId: '', clientId: '' },
     ],
   };
+  // The demo's first URSSAF period is declared and paid.
+  const first = periodRows(demo)[0];
+  if (first && first.deadline < isoDate()) {
+    demo.taxPayments = [{
+      id: uid(), periodStart: first.start, periodEnd: first.end, revenue: first.estimate.gross, amount: Math.round(first.estimate.total), paidOn: first.deadline, notes: '',
+    }];
+  }
+  return demo;
 }
 
 export type SyncStatus = 'loading' | 'saved' | 'saving' | 'error' | 'rejected' | 'load-error';

@@ -1569,6 +1569,7 @@ h1 { font-family: var(--font-display); font-weight: 560; font-size: 1.75rem; let
 
 /* ---------- Controls ---------- */
 .btn { background: var(--accent); color: var(--accent-fg); border-radius: 0.625rem; font-weight: 600; box-shadow: var(--shadow); }
+a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 .btn:hover { background: var(--accent-hover); filter: none; }
 .btn.dark { background: var(--ink); color: var(--surface); }
 .btn.dark:hover { background: var(--ink-2); }
@@ -1626,6 +1627,37 @@ h1 { font-family: var(--font-display); font-weight: 560; font-size: 1.75rem; let
 .prop-card .time-dur { width: 9rem; }
 .prop-card { border-left-width: 0.1875rem; }
 .feed-status { border-radius: 0.5rem; }
+
+/* ---------- Taxes ---------- */
+.tax-next {
+  display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) auto; gap: 1.25rem; align-items: center;
+  background: var(--hero); color: var(--hero-fg); border-radius: 0.875rem; padding: 1.25rem 1.5rem; box-shadow: var(--shadow);
+}
+.tax-next.is-late { background: light-dark(#9b2c2c, #6e2121); }
+.tax-next-main, .tax-next-amount { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; }
+.tax-next-k { font-size: 0.75rem; font-weight: 500; color: color-mix(in srgb, var(--hero-fg) 75%, transparent); }
+.tax-next-date, .tax-next-amount b { font-family: var(--font-display); font-weight: 560; font-size: 1.875rem; letter-spacing: -0.01em; line-height: 1.1; }
+.tax-next-s { font-size: 0.8125rem; color: color-mix(in srgb, var(--hero-fg) 82%, transparent); }
+.tax-next-btn { background: var(--hero-fg); color: var(--hero); }
+.tax-next-btn:hover { background: color-mix(in srgb, var(--hero-fg) 88%, var(--hero)); }
+.tax-next.is-late .tax-next-btn { color: light-dark(#9b2c2c, #6e2121); }
+.trow.t-tax { grid-template-columns: minmax(9rem, 1.4fr) minmax(5.5rem, 0.8fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(7rem, 0.9fr) 2rem; min-width: 46rem; }
+.tax-est { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem; }
+.tax-est > div { background: var(--surface-2); border-radius: 0.625rem; padding: 0.625rem 0.75rem; display: flex; flex-direction: column; gap: 0.125rem; }
+.tax-est b { font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) {
+  .tax-next { grid-template-columns: minmax(0, 1fr) auto; padding: 1.125rem; }
+  .tax-next-btn { grid-column: 1 / -1; justify-content: center; }
+  .tax-next-date, .tax-next-amount b { font-size: 1.5rem; }
+  .tax-next-amount { text-align: right; align-items: flex-end; }
+}
+@media (max-width: 600px) {
+  .trow.t-tax { min-width: 0; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto; gap: 0.5rem; }
+  .trow.t-tax > :nth-child(2), .trow.t-tax > :nth-child(3), .trow.t-tax > :nth-child(5), .trow.t-tax > :nth-child(7) { display: none; }
+}
+@media (max-width: 420px) {
+  .tax-est { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
 
 /* ---------- Subscriptions ---------- */
 .sub-tools { display: flex; align-items: center; gap: 0.625rem; flex-wrap: wrap; }

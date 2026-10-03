@@ -44,6 +44,23 @@ export interface TaxSettings {
   cfp: number;
   /** Versement libératoire de l'impôt sur le revenu (0 = not chosen). */
   vl: number;
+  /** URSSAF declaration and payment rhythm. */
+  period: 'quarter' | 'month';
+  /** Last day of the first declaration period ('' = worked out from the start date). */
+  firstEnd: string;
+}
+
+/** What was declared and paid to URSSAF for one period. */
+export interface TaxPayment {
+  id: string;
+  periodStart: string;
+  periodEnd: string;
+  /** Revenue declared for the period. */
+  revenue: number;
+  /** Amount paid (contributions + CFP + income tax). */
+  amount: number;
+  paidOn: string;
+  notes: string;
 }
 
 export interface WealthSettings {
@@ -224,6 +241,7 @@ export interface AppData {
   assetPrices: AssetPrice[];
   properties: Property[];
   subscriptions: Subscription[];
+  taxPayments: TaxPayment[];
   propertyEntries: PropertyEntry[];
 }
 
