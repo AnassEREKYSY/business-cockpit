@@ -8,9 +8,9 @@ import { taxesOn, type TaxBreakdown } from './tax';
  * contributions paid, by the last day of the following month:
  *   - quarterly: 30 April, 31 July, 31 October, 31 January;
  *   - monthly: the last day of the next month.
- * The first period runs from the start date to the end of the quarter (or month) in which the
- * 90th day of activity falls, so it is longer than the next ones. URSSAF's own calendar wins:
- * the end of the first period can be set by hand in the settings.
+ * Periods follow the calendar: each quarter (or month) counts the revenue cashed in during it,
+ * 0 when nothing came in. The first one starts on the business start date. If URSSAF asked for a
+ * longer first declaration, its end can be set by hand in the settings.
  */
 
 export type Period = { start: string; end: string; deadline: string; first: boolean };
@@ -38,11 +38,9 @@ export function deadlineOf(end: string): string {
   const [y, m] = parts(end);
   return m === 12 ? lastDay(y + 1, 1) : lastDay(y, m + 1);
 }
-/** Default end of the first period: end of the quarter/month holding the 90th day of activity. */
+/** Default end of the first period: end of the quarter (or month) the business started in. */
 export function firstEndFor(start: string, period: TaxSettings['period']): string {
-  const d = new Date(start + 'T12:00:00');
-  d.setDate(d.getDate() + 89);
-  return endOfPeriod(isoDate(d), period);
+  return endOfPeriod(start, period);
 }
 
 /** Every period from the start date until the one after today. */
@@ -68,9 +66,29 @@ export function periodRows(data: AppData, today = isoDate()): PeriodRow[] {
   // Revenue counts when the money arrives: invoices still waiting are left out.
   const txns = allTxns(data).filter((x) => x.paid !== false);
   const firstRevenue = txns.filter((x) => x.type === 'revenue').map((x) => x.date).sort()[0] ?? '';
-  return periods(tax, firstRevenue ? `${firstRevenue.slice(0, 4)}-01-01` : '', today).map((p) => {
+  const list = periods(tax, firstRevenue ? `${firstRevenue.slice(0, 4)}-01-01` : '', today);
+  // A payment goes to the period it was recorded for. One recorded for other dates (settings changed
+  // since) goes to the period holding its start date, if that one has none.
+  const byPeriod = new Map<number, TaxPayment>();
+  const used = new Set<string>();
+  list.forEach((p, i) => {
+    const hit = data.taxPayments.find((x) => x.periodEnd === p.end && x.periodStart >= p.start);
+    if (hit) {
+      byPeriod.set(i, hit);
+      used.add(hit.id);
+    }
+  });
+  for (const x of data.taxPayments) {
+    if (used.has(x.id)) continue;
+    const i = list.findIndex((p) => x.periodStart >= p.start && x.periodStart <= p.end);
+    if (i >= 0 && !byPeriod.has(i)) {
+      byPeriod.set(i, x);
+      used.add(x.id);
+    }
+  }
+  return list.map((p, i) => {
     const estimate = taxesOn(txns.filter((x) => x.date >= p.start && x.date <= p.end), tax);
-    const payment = data.taxPayments.find((x) => x.periodEnd === p.end) ?? data.taxPayments.find((x) => x.periodStart <= p.end && x.periodEnd >= p.start && x.periodEnd <= p.end);
+    const payment = byPeriod.get(i);
     const status: PeriodStatus = payment ? 'paid'
       : p.start > today ? 'upcoming'
         : p.end >= today ? 'open'

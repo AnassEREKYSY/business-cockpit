@@ -181,11 +181,11 @@ function UrssafSection({ data, update }: { data: AppData; update: Update }) {
           {shown.map((r) => <TaxRow key={r.start} r={r} cur={cur} today={today} onEdit={() => setEditing(r)} />)}
         </div>
         {rows.length > 6 && <button className="link-btn small" onClick={() => setShowAll(!showAll)}>{showAll ? t('Show fewer') : t('Show all {n} periods', { n: rows.length })}</button>}
-        {rows[0]?.first && (
-          <div className="small">
-            {t('Your first declaration covers {period}, longer than the next ones. If URSSAF shows a different period, change it in the settings below.', { period: periodLabel(rows[0]) })}
-          </div>
-        )}
+        <div className="small">
+          {tax.firstEnd
+            ? t('Your first declaration covers {period}, as set in the settings below.', { period: periodLabel(rows[0] ?? { start: tax.start, end: tax.firstEnd }) })
+            : t('Each quarter counts the revenue cashed in during its months, 0 when nothing came in.')}
+        </div>
       </div>
 
       <TaxCard tax={tax} currency={cur} data={data} onChange={(next) => update((d) => ({ ...d, profile: { ...d.profile, tax: next } }))} />

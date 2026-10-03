@@ -113,5 +113,7 @@ const fr: Record<string, string> = {
   'Real estate · rent': 'Immobilier · loyers',
   'Property tax (taxe foncière)': 'Taxe foncière',
   CFE: 'CFE',
+  'Your first declaration covers {period}, as set in the settings below.': 'Votre première déclaration couvre {period}, comme indiqué dans les réglages ci-dessous.',
+  'Each quarter counts the revenue cashed in during its months, 0 when nothing came in.': 'Chaque trimestre compte le chiffre d’affaires encaissé pendant ses mois, 0 si rien n’est arrivé.',
 };
 export default fr;
