@@ -3,11 +3,13 @@ import { DatePicker } from '../components/Calendar';
 import { CAT, Donut, HBars, LineChart, compactMoney } from '../components/Charts';
 import { Select } from '../components/Select';
 import { useToast } from '../components/Toast';
-import { Field, IconPencil, IconPlus, IconSearch, Modal, Seg } from '../components/ui';
+import { Field, IconPencil, IconPlus, IconSearch, IconTrash, Modal, Seg } from '../components/ui';
+import { useConfirm } from '../components/Confirm';
 import { parseAmount } from '../lib/finance';
 import { fmtDate, fmtMonth, isoDate, money, monthKey, pct, uid } from '../lib/format';
 import { quoteOnce, searchSymbols, useQuotes, type Quote, type SymbolHit } from '../lib/quotes';
 import { isDay } from '../lib/store';
+import { locale, t, tn } from '../lib/i18n';
 import { removeAsset, removeProperty, removeRow } from '../lib/undo';
 import {
   ACCOUNTS, KINDS, convert, fxRates, holdings, kindLabel, propertyStats, rangeFor, totalsOf, valueSeries, type Fx, type Holding,
@@ -22,10 +24,10 @@ const KIND_COLOR: Record<AssetKind, string> = {
   etf: CAT[0], stock: CAT[1], crypto: CAT[3], opcvm: CAT[2], bond: CAT[6], cash: 'var(--c-exp)', other: CAT[4],
 };
 const fmtMoney = (n: number, c: string) => money(n, c);
-const fmtQty = (n: number) => (Math.abs(n) >= 100 ? n.toLocaleString('en-GB', { maximumFractionDigits: 2 }) : n.toLocaleString('en-GB', { maximumFractionDigits: 6 }));
+const fmtQty = (n: number) => (Math.abs(n) >= 100 ? n.toLocaleString(locale(), { maximumFractionDigits: 2 }) : n.toLocaleString(locale(), { maximumFractionDigits: 6 }));
 const fmtPrice = (n: number, c: string) => {
   try {
-    return new Intl.NumberFormat('en-GB', { style: 'currency', currency: c, maximumFractionDigits: n < 10 ? 4 : 2 }).format(n);
+    return new Intl.NumberFormat(locale(), { style: 'currency', currency: c, maximumFractionDigits: n < 10 ? 4 : 2 }).format(n);
   } catch {
     return `${n} ${c}`;
   }
@@ -41,10 +43,10 @@ export default function WealthPage({ data, update }: { data: AppData; update: Up
       return 'overview';
     }
   });
-  const setTab = (t: Tab) => {
-    setTabState(t);
+  const setTab = (next: Tab) => {
+    setTabState(next);
     try {
-      localStorage.setItem(TAB_KEY, t);
+      localStorage.setItem(TAB_KEY, next);
     } catch {
       /* not remembered */
     }
@@ -75,25 +77,25 @@ export default function WealthPage({ data, update }: { data: AppData; update: Up
     <section className="section loose">
       <div className="head">
         <div className="head-title">
-          <h1>Wealth</h1>
-          <span className="sub">Investments and real estate</span>
+          <h1>{t('Wealth')}</h1>
+          <span className="sub">{t('Investments and real estate')}</span>
         </div>
         <div className="row">
           {autoCount > 0 && (
-            <span className={'feed-status' + (feed.status === 'error' ? ' is-error' : '')} title={feed.at ? `Updated ${new Date(feed.at).toLocaleTimeString()}` : undefined}>
+            <span className={'feed-status' + (feed.status === 'error' ? ' is-error' : '')} title={feed.at ? t('Updated {time}', { time: new Date(feed.at).toLocaleTimeString(locale()) }) : undefined}>
               <span className="sync-dot" style={{ background: feed.status === 'error' ? 'var(--red-2)' : feed.status === 'loading' ? 'var(--amber)' : 'var(--green-2)' }} />
-              {feed.status === 'loading' ? 'Updating prices…' : feed.status === 'error' ? 'Live prices unavailable' : `${liveCount}/${autoCount} live`}
+              {feed.status === 'loading' ? t('Updating prices…') : feed.status === 'error' ? t('Live prices unavailable') : t('{n}/{total} live', { n: liveCount, total: autoCount })}
             </span>
           )}
-          {autoCount > 0 && <button className="btn sm outline" onClick={feed.refresh}>Refresh</button>}
+          {autoCount > 0 && <button className="btn sm outline" onClick={feed.refresh}>{t('Refresh')}</button>}
         </div>
       </div>
 
       <Seg
-        label="Section"
+        label={t('Section')}
         value={tab}
         onChange={setTab}
-        options={[['overview', 'Overview'], ['tr', 'Trade Republic'], ['ma', 'Morocco'], ['estate', 'Real estate'], ...(data.assets.some((a) => a.account === 'other') ? [['other', 'Other'] as [Tab, string]] : [])]}
+        options={[['overview', t('Overview')], ['tr', t('Trade Republic')], ['ma', t('Morocco')], ['estate', t('Real estate')], ...(data.assets.some((a) => a.account === 'other') ? [['other', t('Other')] as [Tab, string]] : [])]}
       />
 
       <div className="page-tab" key={tab}>
@@ -121,21 +123,21 @@ function Overview({ data, quotes, fx, setTab }: { data: AppData; quotes: Record<
     .map((k) => ({ k, t: totalsOf(all.filter((h) => h.asset.account === k), cur, fx) }))
     .filter((x) => x.t.value || x.t.invested);
   const byKind = KINDS.map((k) => ({
-    id: k.key, label: k.label, color: KIND_COLOR[k.key],
+    id: k.key, label: t(k.label), color: KIND_COLOR[k.key],
     value: all.filter((h) => h.asset.kind === k.key).reduce((a, h) => a + convert(h.value, h.asset.currency, cur, fx), 0),
   })).filter((x) => x.value > 0);
-  const slices = [...byKind, ...(estateValue - estateDebt > 0 ? [{ id: 'estate', label: 'Real estate (equity)', color: CAT[5], value: estateValue - estateDebt }] : [])];
+  const slices = [...byKind, ...(estateValue - estateDebt > 0 ? [{ id: 'estate', label: t('Real estate (equity)'), color: CAT[5], value: estateValue - estateDebt }] : [])];
   const series = valueSeries(data, data.assets, quotes, cur, fx);
 
   if (!data.assets.length && !data.properties.length) {
     return (
       <div className="empty wealth-empty">
-        <b>Track everything you own in one place.</b>
-        <span>Add your Trade Republic positions (live prices), your Moroccan stocks and OPCVM, and your rentals.</span>
+        <b>{t('Track everything you own in one place.')}</b>
+        <span>{t('Add your Trade Republic positions (live prices), your Moroccan stocks and OPCVM, and your rentals.')}</span>
         <div className="row" style={{ justifyContent: 'center', gap: '0.5rem' }}>
-          <button className="btn sm" onClick={() => setTab('tr')}>Trade Republic</button>
-          <button className="btn sm outline" onClick={() => setTab('ma')}>Morocco</button>
-          <button className="btn sm outline" onClick={() => setTab('estate')}>Real estate</button>
+          <button className="btn sm" onClick={() => setTab('tr')}>{t('Trade Republic')}</button>
+          <button className="btn sm outline" onClick={() => setTab('ma')}>{t('Morocco')}</button>
+          <button className="btn sm outline" onClick={() => setTab('estate')}>{t('Real estate')}</button>
         </div>
       </div>
     );
@@ -145,61 +147,61 @@ function Overview({ data, quotes, fx, setTab }: { data: AppData; quotes: Record<
     <div className="section loose">
       <div className="kpis">
         <div className="kpi kpi-accent">
-          <div className="kpi-k">Net worth</div>
+          <div className="kpi-k">{t('Net worth')}</div>
           <div className="kpi-v">{m(net)}</div>
-          <div className="kpi-s">Investments + real estate − loans</div>
+          <div className="kpi-s">{t('Investments + real estate − loans')}</div>
         </div>
         <div className="kpi">
-          <div className="kpi-k">Investments</div>
+          <div className="kpi-k">{t('Investments')}</div>
           <div className="kpi-v">{m(inv.value)}</div>
           <div className="kpi-s" style={{ color: tone(inv.gain) }}>{signed(inv.gain, cur)}{inv.gainPct !== null ? ` · ${pct(inv.gainPct)}` : ''}</div>
         </div>
         <div className="kpi">
-          <div className="kpi-k">Real estate equity</div>
+          <div className="kpi-k">{t('Real estate equity')}</div>
           <div className="kpi-v">{m(estateValue - estateDebt)}</div>
-          <div className="kpi-s">{m(estateValue)} value · {m(estateDebt)} owed</div>
+          <div className="kpi-s">{t('{value} value · {debt} owed', { value: m(estateValue), debt: m(estateDebt) })}</div>
         </div>
         <div className="kpi">
-          <div className="kpi-k">Passive income / month</div>
+          <div className="kpi-k">{t('Passive income / month')}</div>
           <div className="kpi-v" style={{ color: tone(estateCash) }}>{m(estateCash)}</div>
-          <div className="kpi-s">Rent cash flow{inv.income ? ` · ${m(inv.income)} dividends so far` : ''}</div>
+          <div className="kpi-s">{t('Rent cash flow')}{inv.income ? ` · ${t('{amount} dividends so far', { amount: m(inv.income) })}` : ''}</div>
         </div>
       </div>
 
       <div className="grid-2 stretch">
         <div className="card" style={{ gap: '1rem' }}>
-          <div className="card-title">Allocation</div>
-          <Donut slices={slices} format={m} center={<><b>{m(net)}</b><span>net worth</span></>} />
+          <div className="card-title">{t('Allocation')}</div>
+          <Donut slices={slices} format={m} center={<><b>{m(net)}</b><span>{t('net worth')}</span></>} />
         </div>
         <div className="card" style={{ gap: '1rem' }}>
-          <div className="card-title">By account</div>
+          <div className="card-title">{t('By account')}</div>
           <HBars
             format={m}
             items={[
               ...accounts.map((a, i) => ({
-                id: a.k, label: ACCOUNTS[a.k].label, value: a.t.value, color: CAT[i], onClick: () => setTab(a.k),
+                id: a.k, label: t(ACCOUNTS[a.k].label), value: a.t.value, color: CAT[i], onClick: () => setTab(a.k),
                 sub: <span style={{ color: tone(a.t.gain) }}>{signed(a.t.gain, cur)}{a.t.gainPct !== null ? ` · ${pct(a.t.gainPct)}` : ''}</span>,
               })),
               ...(props.length
-                ? [{ id: 'estate', label: 'Real estate (equity)', value: estateValue - estateDebt, color: CAT[5], onClick: () => setTab('estate'), sub: `${props.length} ${props.length === 1 ? 'property' : 'properties'}` }]
+                ? [{ id: 'estate', label: t('Real estate (equity)'), value: estateValue - estateDebt, color: CAT[5], onClick: () => setTab('estate'), sub: tn(props.length, '{n} property', '{n} properties') }]
                 : []),
             ]}
           />
-          <div className="small">Moroccan dirhams converted at 1 € = {fx.MAD.toFixed(2)} MAD.</div>
+          <div className="small">{t('Moroccan dirhams converted at 1 € = {rate} MAD.', { rate: fx.MAD.toLocaleString(locale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 }) })}</div>
         </div>
       </div>
 
       {series.length > 1 && (
         <div className="card" style={{ gap: '0.75rem' }}>
           <div className="head">
-            <div className="card-title">Investments over time</div>
-            <span className="small">All accounts, in {cur}</span>
+            <div className="card-title">{t('Investments over time')}</div>
+            <span className="small">{t('All accounts, in {currency}', { currency: cur })}</span>
           </div>
           <LineChart
             points={series}
-            lines={[{ label: 'Value', color: 'var(--ink)', area: true }, { label: 'Invested', color: 'var(--muted)', dashed: true }]}
+            lines={[{ label: t('Value'), color: 'var(--ink)', area: true }, { label: t('Invested'), color: 'var(--muted)', dashed: true }]}
             format={(n) => compactMoney(n, cur)}
-            formatT={(t) => fmtDate(t, false)}
+            formatT={(d) => fmtDate(d, false)}
           />
         </div>
       )}
@@ -216,17 +218,26 @@ function Account({ data, update, account, quotes, fx }: { data: AppData; update:
   const [editing, setEditing] = useState<Asset | null>(null);
   const [pricing, setPricing] = useState(false);
   const list = holdings(data, quotes, account);
-  const t = totalsOf(list, cur, fx);
+  const tot = totalsOf(list, cur, fx);
   const assets = data.assets.filter((a) => a.account === account);
   const series = valueSeries(data, assets, quotes, cur, fx);
   const byKind = KINDS.map((k) => ({
-    id: k.key, label: k.label, color: KIND_COLOR[k.key],
+    id: k.key, label: t(k.label), color: KIND_COLOR[k.key],
     value: list.filter((h) => h.asset.kind === k.key).reduce((a, h) => a + convert(h.value, h.asset.currency, cur, fx), 0),
   })).filter((x) => x.value > 0);
   const manual = assets.filter((a) => !a.symbol && a.kind !== 'cash');
   const held = list.filter((h) => h.qty > 0 || h.value > 0).sort((a, b) => convert(b.value, b.asset.currency, cur, fx) - convert(a.value, a.asset.currency, cur, fx));
   const closed = list.filter((h) => h.qty === 0 && h.value === 0);
 
+  const toast = useToast();
+  const confirm = useConfirm();
+  const deleteAsset = async (a: Asset) => {
+    const n = data.trades.filter((x) => x.assetId === a.id).length;
+    if (n && !(await confirm({ title: t('Delete this asset?'), message: tn(n, '"{name}" and its {n} operation will be deleted.', '"{name}" and its {n} operations will be deleted.', { name: a.name }), confirmLabel: t('Delete'), danger: true }))) return;
+    const { restore } = removeAsset(data, a.id);
+    update((d) => removeAsset(d, a.id).data);
+    toast(<>{t('Deleted:')} <b>{a.name}</b></>, { undo: () => update(restore) });
+  };
   const newAsset = (): Asset => ({
     id: uid(), account, name: '', symbol: '', isin: '', kind: account === 'ma' ? 'stock' : 'etf', currency: cur, price: 0, priceAt: '',
     position: data.assets.reduce((a, x) => Math.max(a, x.position), -1) + 1,
@@ -236,82 +247,82 @@ function Account({ data, update, account, quotes, fx }: { data: AppData; update:
     <div className="section loose">
       <div className="head">
         <div>
-          <h2>{meta.label}</h2>
-          <span className="sub">{meta.hint}</span>
+          <h2>{t(meta.label)}</h2>
+          <span className="sub">{t(meta.hint)}</span>
         </div>
         <div className="row">
-          {manual.length > 0 && <button className="btn outline" onClick={() => setPricing(true)}>Update prices</button>}
-          <button className="btn" onClick={() => setEditing(newAsset())}>+ Add an asset</button>
+          {manual.length > 0 && <button className="btn outline" onClick={() => setPricing(true)}>{t('Update prices')}</button>}
+          <button className="btn" onClick={() => setEditing(newAsset())}>{t('+ Add an asset')}</button>
         </div>
       </div>
 
       {assets.length === 0 ? (
         <div className="empty wealth-empty">
-          <b>No {meta.label} assets yet.</b>
+          <b>{t('No {account} assets yet.', { account: t(meta.label) })}</b>
           <span>
             {account === 'tr'
-              ? 'Add an ETF, a stock or a crypto: search it by name, ticker or ISIN to get live prices, then log your buys.'
-              : 'Add your Moroccan stocks and OPCVM funds, log your buys, and type the latest price or NAV from time to time.'}
+              ? t('Add an ETF, a stock or a crypto: search it by name, ticker or ISIN to get live prices, then log your buys.')
+              : t('Add your Moroccan stocks and OPCVM funds, log your buys, and type the latest price or NAV from time to time.')}
           </span>
-          <button className="btn sm" style={{ alignSelf: 'center' }} onClick={() => setEditing(newAsset())}>+ Add an asset</button>
+          <button className="btn sm" style={{ alignSelf: 'center' }} onClick={() => setEditing(newAsset())}>{t('+ Add an asset')}</button>
         </div>
       ) : (
         <>
           <div className="kpis">
             <div className="kpi kpi-accent">
-              <div className="kpi-k">Value</div>
-              <div className="kpi-v">{m(t.value)}</div>
-              <div className="kpi-s">{cur !== data.profile.currency ? `≈ ${fmtMoney(convert(t.value, cur, data.profile.currency, fx), data.profile.currency)}` : `${held.length} positions`}</div>
+              <div className="kpi-k">{t('Value')}</div>
+              <div className="kpi-v">{m(tot.value)}</div>
+              <div className="kpi-s">{cur !== data.profile.currency ? `≈ ${fmtMoney(convert(tot.value, cur, data.profile.currency, fx), data.profile.currency)}` : tn(held.length, '{n} position', '{n} positions')}</div>
             </div>
             <div className="kpi">
-              <div className="kpi-k">Invested</div>
-              <div className="kpi-v">{m(t.invested)}</div>
-              <div className="kpi-s">Buys − sells, fees included</div>
+              <div className="kpi-k">{t('Invested')}</div>
+              <div className="kpi-v">{m(tot.invested)}</div>
+              <div className="kpi-s">{t('Buys − sells, fees included')}</div>
             </div>
             <div className="kpi">
-              <div className="kpi-k">Total gain</div>
-              <div className="kpi-v" style={{ color: tone(t.gain) }}>{signed(t.gain, cur)}</div>
-              <div className="kpi-s" style={{ color: tone(t.gain) }}>{t.gainPct !== null ? pct(t.gainPct) : '—'} · gains + dividends</div>
+              <div className="kpi-k">{t('Total gain')}</div>
+              <div className="kpi-v" style={{ color: tone(tot.gain) }}>{signed(tot.gain, cur)}</div>
+              <div className="kpi-s" style={{ color: tone(tot.gain) }}>{tot.gainPct !== null ? pct(tot.gainPct) : '—'} · {t('gains + dividends')}</div>
             </div>
             <div className="kpi">
-              <div className="kpi-k">Dividends</div>
-              <div className="kpi-v">{m(t.income)}</div>
-              <div className="kpi-s">Received so far</div>
+              <div className="kpi-k">{t('Dividends')}</div>
+              <div className="kpi-v">{m(tot.income)}</div>
+              <div className="kpi-s">{t('Received so far')}</div>
             </div>
           </div>
 
           <div className="grid-2 stretch">
             <div className="card" style={{ gap: '0.75rem' }}>
               <div className="head">
-                <div className="card-title">Performance</div>
-                <span className="small">Value vs money invested</span>
+                <div className="card-title">{t('Performance')}</div>
+                <span className="small">{t('Value vs money invested')}</span>
               </div>
               <LineChart
                 points={series}
-                lines={[{ label: 'Value', color: 'var(--ink)', area: true }, { label: 'Invested', color: 'var(--muted)', dashed: true }]}
+                lines={[{ label: t('Value'), color: 'var(--ink)', area: true }, { label: t('Invested'), color: 'var(--muted)', dashed: true }]}
                 format={(n) => compactMoney(n, cur)}
                 formatT={(d) => fmtDate(d)}
               />
             </div>
             <div className="card" style={{ gap: '1rem' }}>
-              <div className="card-title">Composition</div>
-              <Donut slices={byKind} format={m} center={<><b>{byKind.length}</b><span>{byKind.length === 1 ? 'class' : 'classes'}</span></>} />
+              <div className="card-title">{t('Composition')}</div>
+              <Donut slices={byKind} format={m} center={<><b>{byKind.length}</b><span>{tn(byKind.length, 'class', 'classes')}</span></>} />
             </div>
           </div>
 
           <div className="card" style={{ gap: '0.375rem' }}>
             <div className="head">
-              <div className="card-title">Positions</div>
-              <span className="small">Click a line for its operations</span>
+              <div className="card-title">{t('Positions')}</div>
+              <span className="small">{t('Click a line for its operations')}</span>
             </div>
             <div className="table-wrap">
               <div className="trow th t-hold">
-                <span>Asset</span><span className="r">Quantity</span><span className="r">Avg. cost</span><span className="r">Price</span>
-                <span className="r">Value</span><span className="r">Gain</span><span className="r">Weight</span>
+                <span>{t('Asset')}</span><span className="r">{t('Quantity')}</span><span className="r">{t('Avg. cost')}</span><span className="r">{t('Price')}</span>
+                <span className="r">{t('Value')}</span><span className="r">{t('Gain')}</span><span className="r">{t('Weight')}</span><span />
               </div>
-              {held.map((h) => <HoldingRow key={h.asset.id} h={h} total={t.value} cur={cur} fx={fx} onClick={() => setEditing(h.asset)} />)}
-              {closed.length > 0 && <div className="trow-sep">Sold or empty</div>}
-              {closed.map((h) => <HoldingRow key={h.asset.id} h={h} total={t.value} cur={cur} fx={fx} onClick={() => setEditing(h.asset)} />)}
+              {held.map((h) => <HoldingRow key={h.asset.id} h={h} total={tot.value} cur={cur} fx={fx} onClick={() => setEditing(h.asset)} onDelete={() => deleteAsset(h.asset)} />)}
+              {closed.length > 0 && <div className="trow-sep">{t('Sold or empty')}</div>}
+              {closed.map((h) => <HoldingRow key={h.asset.id} h={h} total={tot.value} cur={cur} fx={fx} onClick={() => setEditing(h.asset)} onDelete={() => deleteAsset(h.asset)} />)}
             </div>
           </div>
         </>
@@ -323,23 +334,23 @@ function Account({ data, update, account, quotes, fx }: { data: AppData; update:
   );
 }
 
-function HoldingRow({ h, total, cur, fx, onClick }: { h: Holding; total: number; cur: string; fx: Fx; onClick: () => void }) {
+function HoldingRow({ h, total, cur, fx, onClick, onDelete }: { h: Holding; total: number; cur: string; fx: Fx; onClick: () => void; onDelete: () => void }) {
   const c = h.asset.currency;
   const w = total ? (convert(h.value, c, cur, fx) / total) * 100 : 0;
   return (
-    <button type="button" className={'trow t-hold t-click' + (h.qty === 0 ? ' stopped' : '')} onClick={onClick}>
+    <div role="button" tabIndex={0} className={'trow t-hold t-click' + (h.qty === 0 ? ' stopped' : '')} onClick={(e) => !(e.target as HTMLElement).closest('.icon-btn') && onClick()} onKeyDown={(e) => e.target === e.currentTarget && e.key === 'Enter' && onClick()}>
       <span className="hold-name">
         <span className="swatch" style={{ background: KIND_COLOR[h.asset.kind] }} />
         <span style={{ minWidth: 0 }}>
           <b className="ellipsis">{h.asset.name}</b>
           <span className="small ellipsis">
-            {kindLabel(h.asset.kind)}{h.asset.symbol ? ` · ${h.asset.symbol}` : ''}{h.live ? ' · live' : h.asset.priceAt ? ` · price of ${fmtDate(h.asset.priceAt.slice(0, 10), true)}` : ''}
+            {t(kindLabel(h.asset.kind))}{h.asset.symbol ? ` · ${h.asset.symbol}` : ''}{h.live ? ` · ${t('live')}` : h.asset.priceAt ? ` · ${t('price of {date}', { date: fmtDate(h.asset.priceAt.slice(0, 10), true) })}` : ''}
           </span>
         </span>
       </span>
       <span className="r">{fmtQty(h.qty)}</span>
       <span className="r" style={{ color: 'var(--ink-2)' }}>{h.qty ? fmtPrice(h.cost / h.qty, c) : '—'}</span>
-      <span className="r">{h.price ? fmtPrice(h.price, c) : '—'}{h.live && <span className="live-dot small-dot" title="Live price" />}</span>
+      <span className="r">{h.price ? fmtPrice(h.price, c) : '—'}{h.live && <span className="live-dot small-dot" title={t('Live price')} />}</span>
       <b className="r">{fmtMoney(h.value, c)}</b>
       <span className="r" style={{ color: tone(h.gain), fontWeight: 600 }}>
         {signed(h.gain, c)}
@@ -349,7 +360,8 @@ function HoldingRow({ h, total, cur, fx, onClick }: { h: Holding; total: number;
         <span className="weight"><span style={{ width: `${Math.min(100, w)}%`, background: KIND_COLOR[h.asset.kind] }} /></span>
         <span className="small">{w.toFixed(1)}%</span>
       </span>
-    </button>
+      <span className="row-actions"><button className="icon-btn danger" onClick={onDelete} title={t('Delete asset')} aria-label={t('Delete {name}', { name: h.asset.name })}><IconTrash size={13} /></button></span>
+    </div>
   );
 }
 
@@ -360,8 +372,9 @@ const SIDE_OPTIONS = [
   { value: 'sell' as const, label: 'Sell' },
   { value: 'dividend' as const, label: 'Dividend' },
 ];
-const KIND_OPTIONS = KINDS.map((k) => ({ value: k.key, label: k.label, color: KIND_COLOR[k.key] }));
-const ACCOUNT_OPTIONS = (Object.keys(ACCOUNTS) as AccountKey[]).map((k) => ({ value: k, label: ACCOUNTS[k].label }));
+// Functions, so the labels follow the language.
+const kindOptions = () => KINDS.map((k) => ({ value: k.key, label: t(k.label), color: KIND_COLOR[k.key] }));
+const accountOptions = () => (Object.keys(ACCOUNTS) as AccountKey[]).map((k) => ({ value: k, label: t(ACCOUNTS[k].label) }));
 const CURRENCY_OPTIONS = ['EUR', 'MAD', 'USD'].map((c) => ({ value: c, label: c }));
 
 /** Positive number with up to 8 decimals ("0.025", "1 250,5"). */
@@ -394,7 +407,7 @@ function AssetModal({ asset, data, update, quotes, onClose }: { asset: Asset; da
       setHits(await searchSymbols(query));
     } catch {
       setHits([]);
-      setSearchError('Search is unavailable right now (it works once the site is online on Vercel). You can type the symbol yourself.');
+      setSearchError(t('Search is unavailable right now (it works once the site is online on Vercel). You can type the symbol yourself.'));
     } finally {
       setSearching(false);
     }
@@ -424,28 +437,28 @@ function AssetModal({ asset, data, update, quotes, onClose }: { asset: Asset; da
       assets: creating ? [...d.assets, next] : d.assets.map((a) => (a.id === next.id ? next : a)),
       assetPrices: point ? [...d.assetPrices.filter((p) => !(p.assetId === next.id && p.date === point.date)), point] : d.assetPrices,
     }));
-    toast(creating ? <><b>{name}</b> added. Now log your first buy.</> : <><b>{name}</b> saved</>, { tone: 'success' });
+    toast(creating ? <>{t('Added:')} <b>{name}</b>. {t('Now log your first buy.')}</> : <>{t('Saved:')} <b>{name}</b></>, { tone: 'success' });
     if (!creating) onClose();
   };
   const remove = () => {
     const { restore } = removeAsset(data, asset.id);
     update((d) => removeAsset(d, asset.id).data);
-    toast(<><b>{asset.name}</b> and its operations deleted</>, { undo: () => update(restore) });
+    toast(<>{t('Deleted with its operations:')} <b>{asset.name}</b></>, { undo: () => update(restore) });
     onClose();
   };
   const saved = data.assets.some((a) => a.id === asset.id);
 
   return (
-    <Modal title={saved ? f.name || 'Asset' : 'New asset'} onClose={onClose}>
+    <Modal title={saved ? f.name || t('Asset') : t('New asset')} onClose={onClose}>
       <form className="section" onSubmit={(e) => { e.preventDefault(); save(); }}>
         {f.account === 'tr' || f.account === 'other' ? (
           <div className="symbol-search">
             <div className="row" style={{ gap: '0.5rem', flexWrap: 'nowrap' }}>
               <label className="search" style={{ maxWidth: 'none' }}>
                 <IconSearch />
-                <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), void search())} placeholder="Search by name, ticker or ISIN (e.g. IE00BK5BQT80)" aria-label="Search a market symbol" />
+                <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), void search())} placeholder={t('Search by name, ticker or ISIN (e.g. IE00BK5BQT80)')} aria-label={t('Search a market symbol')} />
               </label>
-              <button type="button" className="btn sm outline" onClick={() => void search()} disabled={searching}>{searching ? 'Searching…' : 'Search'}</button>
+              <button type="button" className="btn sm outline" onClick={() => void search()} disabled={searching}>{searching ? t('Searching…') : t('Search')}</button>
             </div>
             {hits && (
               <div className="etf-hits">
@@ -455,33 +468,33 @@ function AssetModal({ asset, data, update, quotes, onClose }: { asset: Asset; da
                     <span className="small">{h.symbol} · {h.type} · {h.exchange}</span>
                   </button>
                 ))}
-                {hits.length === 0 && !searchError && <div className="small">Nothing found. Try the ISIN or the ticker.</div>}
+                {hits.length === 0 && !searchError && <div className="small">{t('Nothing found. Try the ISIN or the ticker.')}</div>}
               </div>
             )}
             {searchError && <div className="small" style={{ color: 'var(--amber)' }}>{searchError}</div>}
           </div>
         ) : (
-          <div className="small">Moroccan prices aren't available from a free live feed: type the latest price (or NAV for an OPCVM) here or with "Update prices". Each update is kept to draw the performance.</div>
+          <div className="small">{t('Moroccan prices aren\'t available from a free live feed: type the latest price (or NAV for an OPCVM) here or with "Update prices". Each update is kept to draw the performance.')}</div>
         )}
 
         <div className="form-grid">
-          <Field label="Name"><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Vanguard FTSE All-World" /></Field>
-          <Field label="Type"><Select value={f.kind} onChange={(kind) => setF({ ...f, kind })} options={KIND_OPTIONS} ariaLabel="Type" /></Field>
-          <Field label="Account"><Select value={f.account} onChange={(account) => setF({ ...f, account, currency: ACCOUNTS[account].currency })} options={ACCOUNT_OPTIONS} ariaLabel="Account" /></Field>
-          <Field label="Currency"><Select value={f.currency} onChange={(currency) => setF({ ...f, currency })} options={CURRENCY_OPTIONS} ariaLabel="Currency" /></Field>
-          <Field label="Live symbol (optional)"><input className="input" value={f.symbol} onChange={(e) => setF({ ...f, symbol: e.target.value.toUpperCase() })} placeholder="VWCE.DE, BTC-EUR…" /></Field>
-          <Field label="ISIN (optional)"><input className="input" value={f.isin} onChange={(e) => setF({ ...f, isin: e.target.value.toUpperCase() })} /></Field>
-          <Field label={f.symbol ? `Last price (${f.currency}), auto` : `Current price (${f.currency})`}>
+          <Field label={t('Name')}><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Vanguard FTSE All-World" /></Field>
+          <Field label={t('Type')}><Select value={f.kind} onChange={(kind) => setF({ ...f, kind })} options={kindOptions()} ariaLabel={t('Type')} /></Field>
+          <Field label={t('Account')}><Select value={f.account} onChange={(account) => setF({ ...f, account, currency: ACCOUNTS[account].currency })} options={accountOptions()} ariaLabel={t('Account')} /></Field>
+          <Field label={t('Currency')}><Select value={f.currency} onChange={(currency) => setF({ ...f, currency })} options={CURRENCY_OPTIONS} ariaLabel={t('Currency')} /></Field>
+          <Field label={t('Live symbol (optional)')}><input className="input" value={f.symbol} onChange={(e) => setF({ ...f, symbol: e.target.value.toUpperCase() })} placeholder="VWCE.DE, BTC-EUR…" /></Field>
+          <Field label={t('ISIN (optional)')}><input className="input" value={f.isin} onChange={(e) => setF({ ...f, isin: e.target.value.toUpperCase() })} /></Field>
+          <Field label={f.symbol ? t('Last price ({currency}), auto', { currency: f.currency }) : t('Current price ({currency})', { currency: f.currency })}>
             <input className="input" inputMode="decimal" value={live ? String(live.price) : price} disabled={!!live} onChange={(e) => setPrice(e.target.value)} placeholder={f.kind === 'cash' ? '1' : '0'} />
           </Field>
         </div>
-        {priceValue === null && <div className="small form-error">Invalid price. Example: 1640 or 0.5432</div>}
+        {priceValue === null && <div className="small form-error">{t('Invalid price. Example: 1640 or 0.5432')}</div>}
 
         <div className="modal-foot">
-          {saved ? <button className="btn sm danger" type="button" onClick={remove}>Delete asset</button> : <span />}
+          {saved ? <button className="btn sm danger" type="button" onClick={remove}>{t('Delete asset')}</button> : <span />}
           <div className="row" style={{ gap: '0.5rem' }}>
-            <button className="btn sm ghost" type="button" onClick={onClose}>{saved ? 'Close' : 'Cancel'}</button>
-            <button className="btn sm" type="submit" disabled={!f.name.trim() || priceValue === null}>{saved ? 'Save' : 'Add asset'}</button>
+            <button className="btn sm ghost" type="button" onClick={onClose}>{saved ? t('Close') : t('Cancel')}</button>
+            <button className="btn sm" type="submit" disabled={!f.name.trim() || priceValue === null}>{saved ? t('Save') : t('Add asset')}</button>
           </div>
         </div>
       </form>
@@ -503,23 +516,23 @@ function Operations({ asset, trades, data, update }: { asset: Asset; trades: Tra
   const p = parseNum(price);
   const fe = fees.trim() ? parseNum(fees) : 0;
   const valid = isDay(date) && p !== null && p > 0 && fe !== null && (side === 'dividend' || (q !== null && q > 0));
-  const held = trades.reduce((a, t) => a + (t.side === 'buy' ? t.quantity : t.side === 'sell' ? -t.quantity : 0), 0);
+  const held = trades.reduce((a, x) => a + (x.side === 'buy' ? x.quantity : x.side === 'sell' ? -x.quantity : 0), 0);
 
   const add = () => {
     if (!valid || p === null || fe === null) return;
-    const t: Trade = { id: uid(), assetId: asset.id, date, side, quantity: side === 'dividend' ? 0 : q ?? 0, price: p, fees: fe };
-    update((d) => ({ ...d, trades: [...d.trades, t].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id)) }));
+    const tr: Trade = { id: uid(), assetId: asset.id, date, side, quantity: side === 'dividend' ? 0 : q ?? 0, price: p, fees: fe };
+    update((d) => ({ ...d, trades: [...d.trades, tr].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id)) }));
     const total = side === 'dividend' ? p : (q ?? 0) * p;
-    toast(<>{side === 'buy' ? 'Buy' : side === 'sell' ? 'Sell' : 'Dividend'} of <b>{fmtMoney(total, c)}</b> logged</>, {
-      undo: () => update((d) => ({ ...d, trades: d.trades.filter((x) => x.id !== t.id) })),
+    toast(<>{side === 'buy' ? t('Buy logged:') : side === 'sell' ? t('Sell logged:') : t('Dividend logged:')} <b>{fmtMoney(total, c)}</b></>, {
+      undo: () => update((d) => ({ ...d, trades: d.trades.filter((x) => x.id !== tr.id) })),
     });
     setQty('');
     setFees('');
   };
-  const remove = (t: Trade) => {
-    const { restore } = removeRow(data, 'trades', t.id);
-    update((d) => removeRow(d, 'trades', t.id).data);
-    toast('Operation deleted', {
+  const remove = (tr: Trade) => {
+    const { restore } = removeRow(data, 'trades', tr.id);
+    update((d) => removeRow(d, 'trades', tr.id).data);
+    toast(t('Operation deleted'), {
       undo: () => update((d) => {
         const r = restore(d);
         return { ...r, trades: [...r.trades].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id)) };
@@ -530,31 +543,45 @@ function Operations({ asset, trades, data, update }: { asset: Asset; trades: Tra
   return (
     <div className="ops">
       <div className="checklist-head">
-        <span className="card-title">Operations</span>
-        <span className="small">{fmtQty(held)} held · {trades.length} {trades.length === 1 ? 'operation' : 'operations'}</span>
+        <span className="card-title">{t('Operations')}</span>
+        <span className="small">{t('{qty} held', { qty: fmtQty(held) })} · {tn(trades.length, '{n} operation', '{n} operations')}</span>
       </div>
       <form className="op-form" onSubmit={(e) => { e.preventDefault(); add(); }}>
-        <Seg label="Operation" value={side} onChange={setSide} options={SIDE_OPTIONS.map((o) => [o.value, o.label] as [Trade['side'], string])} />
+        <Seg label={t('Operation')} value={side} onChange={setSide} options={SIDE_OPTIONS.map((o) => [o.value, t(o.label)] as [Trade['side'], string])} />
         <div className="op-fields">
-          <div className="op-date"><DatePicker value={date} onChange={setDate} clearable={false} size="sm" ariaLabel="Date" /></div>
-          {side !== 'dividend' && <input className="input" inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="Quantity" aria-label="Quantity" />}
-          <input className="input" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} placeholder={side === 'dividend' ? `Amount (${c})` : `Price per unit (${c})`} aria-label="Price" />
-          <input className="input" inputMode="decimal" value={fees} onChange={(e) => setFees(e.target.value)} placeholder="Fees" aria-label="Fees" />
-          <button className="btn sm" type="submit" disabled={!valid}>Add</button>
+          <div className="op-date"><DatePicker value={date} onChange={setDate} clearable={false} size="sm" ariaLabel={t('Date')} /></div>
+          {side !== 'dividend' && <input className="input" inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} placeholder={t('Quantity')} aria-label={t('Quantity')} />}
+          <input className="input" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} placeholder={side === 'dividend' ? t('Amount ({currency})', { currency: c }) : t('Price per unit ({currency})', { currency: c })} aria-label={t('Price')} />
+          <input className="input" inputMode="decimal" value={fees} onChange={(e) => setFees(e.target.value)} placeholder={t('Fees')} aria-label={t('Fees')} />
+          <button className="btn sm" type="submit" disabled={!valid}>{t('Add')}</button>
         </div>
-        {side !== 'dividend' && q && p ? <div className="small">Total {fmtMoney(q * p + (side === 'buy' ? fe ?? 0 : -(fe ?? 0)), c)}</div> : null}
+        {side !== 'dividend' && q && p ? <div className="small">{t('Total {amount}', { amount: fmtMoney(q * p + (side === 'buy' ? fe ?? 0 : -(fe ?? 0)), c) })}</div> : null}
       </form>
+      {!asset.symbol && data.assetPrices.some((x) => x.assetId === asset.id) && (
+        <details className="price-history">
+          <summary>{tn(data.assetPrices.filter((x) => x.assetId === asset.id).length, 'Price history · {n} price typed', 'Price history · {n} prices typed')}</summary>
+          {data.assetPrices.filter((x) => x.assetId === asset.id).slice().reverse().map((x) => (
+            <div className="op-row" key={x.id}>
+              <span className="time-date">{fmtDate(x.date, true)} {x.date.slice(2, 4)}</span>
+              <span className="op-side dividend">{t('Price')}</span>
+              <span />
+              <b className="r">{fmtPrice(x.price, c)}</b>
+              <button className="x" onClick={() => { const { restore } = removeRow(data, 'assetPrices', x.id); update((d) => removeRow(d, 'assetPrices', x.id).data); toast(t('Price deleted'), { undo: () => update(restore) }); }} aria-label={t('Delete price')}>×</button>
+            </div>
+          ))}
+        </details>
+      )}
       <div className="op-list">
-        {trades.map((t) => (
-          <div className="op-row" key={t.id}>
-            <span className="time-date">{fmtDate(t.date, t.date.slice(0, 4) === String(new Date().getFullYear()))}</span>
-            <span className={'op-side ' + t.side}>{t.side === 'buy' ? 'Buy' : t.side === 'sell' ? 'Sell' : 'Dividend'}</span>
-            <span className="ellipsis">{t.side === 'dividend' ? 'Paid out' : `${fmtQty(t.quantity)} × ${fmtPrice(t.price, c)}`}{t.fees ? <span className="small"> · fees {fmtMoney(t.fees, c)}</span> : null}</span>
-            <b className="r">{fmtMoney(t.side === 'dividend' ? t.price : t.quantity * t.price, c)}</b>
-            <button className="x" onClick={() => remove(t)} aria-label="Delete operation">×</button>
+        {trades.map((tr) => (
+          <div className="op-row" key={tr.id}>
+            <span className="time-date">{fmtDate(tr.date, tr.date.slice(0, 4) === String(new Date().getFullYear()))}</span>
+            <span className={'op-side ' + tr.side}>{tr.side === 'buy' ? t('Buy') : tr.side === 'sell' ? t('Sell') : t('Dividend')}</span>
+            <span className="ellipsis">{tr.side === 'dividend' ? t('Paid out') : `${fmtQty(tr.quantity)} × ${fmtPrice(tr.price, c)}`}{tr.fees ? <span className="small"> · {t('fees {amount}', { amount: fmtMoney(tr.fees, c) })}</span> : null}</span>
+            <b className="r">{fmtMoney(tr.side === 'dividend' ? tr.price : tr.quantity * tr.price, c)}</b>
+            <button className="x" onClick={() => remove(tr)} aria-label={t('Delete operation')}>×</button>
           </div>
         ))}
-        {trades.length === 0 && <div className="empty">Log your first buy: date, quantity and price per unit.</div>}
+        {trades.length === 0 && <div className="empty">{t('Log your first buy: date, quantity and price per unit.')}</div>}
       </div>
     </div>
   );
@@ -579,35 +606,35 @@ function PricesModal({ assets, data, update, onClose }: { assets: Asset[]; data:
         ...changes.map((x) => ({ id: uid(), assetId: x.a.id, date, price: x.v! })),
       ],
     }));
-    toast(`${changes.length} ${changes.length === 1 ? 'price' : 'prices'} updated`, { tone: 'success' });
+    toast(tn(changes.length, '{n} price updated', '{n} prices updated'), { tone: 'success' });
     onClose();
   };
   const last = (id: string) => data.assetPrices.filter((p) => p.assetId === id).at(-1);
   return (
-    <Modal title="Update prices" onClose={onClose}>
+    <Modal title={t('Update prices')} onClose={onClose}>
       <form className="section" onSubmit={(e) => { e.preventDefault(); save(); }}>
-        <div className="small">Type the closing price (or the fund's NAV) from the Bourse de Casablanca website or your bank app.</div>
-        <Field label="Prices of"><DatePicker value={date} onChange={setDate} clearable={false} ariaLabel="Date" /></Field>
+        <div className="small">{t("Type the closing price (or the fund's NAV) from the Bourse de Casablanca website or your bank app.")}</div>
+        <Field label={t('Prices of')}><DatePicker value={date} onChange={setDate} clearable={false} ariaLabel={t('Date')} /></Field>
         <div className="price-list">
           {assets.map((a) => (
             <label className="price-row" key={a.id}>
               <span style={{ minWidth: 0 }}>
                 <b className="ellipsis">{a.name}</b>
-                <span className="small">{kindLabel(a.kind)}{last(a.id) ? ` · last ${fmtPrice(last(a.id)!.price, a.currency)} on ${fmtDate(last(a.id)!.date, true)}` : ''}</span>
+                <span className="small">{t(kindLabel(a.kind))}{last(a.id) ? ` · ${t('last {price} on {date}', { price: fmtPrice(last(a.id)!.price, a.currency), date: fmtDate(last(a.id)!.date, true) })}` : ''}</span>
               </span>
               <span className="pct-input">
-                <input className="input" inputMode="decimal" value={vals[a.id] ?? ''} onChange={(e) => setVals({ ...vals, [a.id]: e.target.value })} aria-label={`Price of ${a.name}`} />
+                <input className="input" inputMode="decimal" value={vals[a.id] ?? ''} onChange={(e) => setVals({ ...vals, [a.id]: e.target.value })} aria-label={t('Price of {name}', { name: a.name })} />
                 <span>{a.currency}</span>
               </span>
             </label>
           ))}
         </div>
-        {bad && <div className="small form-error">One of the prices isn't a valid number.</div>}
+        {bad && <div className="small form-error">{t("One of the prices isn't a valid number.")}</div>}
         <div className="modal-foot">
           <span />
           <div className="row" style={{ gap: '0.5rem' }}>
-            <button className="btn sm ghost" type="button" onClick={onClose}>Cancel</button>
-            <button className="btn sm" type="submit" disabled={bad}>Save prices</button>
+            <button className="btn sm ghost" type="button" onClick={onClose}>{t('Cancel')}</button>
+            <button className="btn sm" type="submit" disabled={bad}>{t('Save prices')}</button>
           </div>
         </div>
       </form>
@@ -638,66 +665,66 @@ function RealEstate({ data, update, fx }: { data: AppData; update: Update; fx: F
     if (p.loan && !have.some((e) => e.kind === 'loan')) add.push({ id: uid(), propertyId: p.id, date: isoDate(), kind: 'loan', amount: p.loan, label: 'Mortgage' });
     if (p.charges && !have.some((e) => e.kind === 'expense' && e.label === 'Monthly charges')) add.push({ id: uid(), propertyId: p.id, date: isoDate(), kind: 'expense', amount: p.charges, label: 'Monthly charges' });
     if (!add.length) {
-      toast(`${fmtMonth(k, true)} is already logged for ${p.name}`);
+      toast(t('{month} is already logged for {name}', { month: fmtMonth(k, true), name: p.name }));
       return;
     }
     const ids = new Set(add.map((e) => e.id));
     update((d) => ({ ...d, propertyEntries: [...add, ...d.propertyEntries] }));
-    toast(<><b>{fmtMonth(k, true)}</b> logged for {p.name}</>, { tone: 'success', undo: () => update((d) => ({ ...d, propertyEntries: d.propertyEntries.filter((e) => !ids.has(e.id)) })) });
+    toast(<>{t('Logged for {name}:', { name: p.name })} <b>{fmtMonth(k, true)}</b></>, { tone: 'success', undo: () => update((d) => ({ ...d, propertyEntries: d.propertyEntries.filter((e) => !ids.has(e.id)) })) });
   };
 
   return (
     <div className="section loose">
       <div className="head">
         <div>
-          <h2>Real estate</h2>
-          <span className="sub">Each property, what it's worth and what it brings in every month</span>
+          <h2>{t('Real estate')}</h2>
+          <span className="sub">{t("Each property, what it's worth and what it brings in every month")}</span>
         </div>
-        <button className="btn" onClick={() => setEditing(newProperty())}>+ Add a property</button>
+        <button className="btn" onClick={() => setEditing(newProperty())}>{t('+ Add a property')}</button>
       </div>
 
       {props.length === 0 ? (
         <div className="empty wealth-empty">
-          <b>No property yet.</b>
-          <span>Add a house or an apartment with its price, rent, charges and loan. Then log each month in one click.</span>
-          <button className="btn sm" style={{ alignSelf: 'center' }} onClick={() => setEditing(newProperty())}>+ Add a property</button>
+          <b>{t('No property yet.')}</b>
+          <span>{t('Add a house or an apartment with its price, rent, charges and loan. Then log each month in one click.')}</span>
+          <button className="btn sm" style={{ alignSelf: 'center' }} onClick={() => setEditing(newProperty())}>{t('+ Add a property')}</button>
         </div>
       ) : (
         <>
           <div className="kpis">
             <div className="kpi kpi-accent">
-              <div className="kpi-k">Total value</div>
+              <div className="kpi-k">{t('Total value')}</div>
               <div className="kpi-v">{fmtMoney(total((x) => x.p.value), cur)}</div>
-              <div className="kpi-s">{props.length} {props.length === 1 ? 'property' : 'properties'}</div>
+              <div className="kpi-s">{tn(props.length, '{n} property', '{n} properties')}</div>
             </div>
             <div className="kpi">
-              <div className="kpi-k">Equity</div>
+              <div className="kpi-k">{t('Equity')}</div>
               <div className="kpi-v">{fmtMoney(total((x) => x.s.equity), cur)}</div>
-              <div className="kpi-s">{fmtMoney(total((x) => x.p.debt), cur)} still owed</div>
+              <div className="kpi-s">{t('{amount} still owed', { amount: fmtMoney(total((x) => x.p.debt), cur) })}</div>
             </div>
             <div className="kpi">
-              <div className="kpi-k">Cash flow / month</div>
+              <div className="kpi-k">{t('Cash flow / month')}</div>
               <div className="kpi-v" style={{ color: tone(total((x) => x.s.cashflow)) }}>{fmtMoney(total((x) => x.s.cashflow), cur)}</div>
-              <div className="kpi-s">Rent − charges − loan</div>
+              <div className="kpi-s">{t('Rent − charges − loan')}</div>
             </div>
             <div className="kpi">
-              <div className="kpi-k">Last 12 months</div>
+              <div className="kpi-k">{t('Last 12 months')}</div>
               <div className="kpi-v" style={{ color: tone(total((x) => x.s.total12)) }}>{fmtMoney(total((x) => x.s.total12), cur)}</div>
-              <div className="kpi-s">Net, from what you logged</div>
+              <div className="kpi-s">{t('Net, from what you logged')}</div>
             </div>
           </div>
 
           {props.length > 1 && (
             <div className="card" style={{ gap: '1rem' }}>
               <div className="head">
-                <div className="card-title">Net generated, last 12 months</div>
-                <span className="small">Rent − expenses − loan, from your logged months · in {cur}</span>
+                <div className="card-title">{t('Net generated, last 12 months')}</div>
+                <span className="small">{t('Rent − expenses − loan, from your logged months · in {currency}', { currency: cur })}</span>
               </div>
               <HBars
                 format={(n) => fmtMoney(n, cur)}
                 items={props.map(({ p, s }, i) => ({
                   id: p.id, label: p.name, value: Math.max(0, convert(s.total12, p.currency, cur, fx)), color: CAT[i % CAT.length],
-                  sub: `${fmtMoney(s.cashflow, p.currency)} expected per month${s.total12 < 0 ? ` · ${fmtMoney(s.total12, p.currency)} so far` : ''}`,
+                  sub: t('{amount} expected per month', { amount: fmtMoney(s.cashflow, p.currency) }) + (s.total12 < 0 ? ` · ${t('{amount} so far', { amount: fmtMoney(s.total12, p.currency) })}` : ''),
                 }))}
               />
             </div>
@@ -733,18 +760,25 @@ function PropertyCard({ p, s, color, data, update, open, onToggle, onEdit, onLog
   const toast = useToast();
   const entries = data.propertyEntries.filter((e) => e.propertyId === p.id);
   const a = parseAmount(amount);
+  const confirm = useConfirm();
+  const delProp = async () => {
+    if (!(await confirm({ title: t('Delete this property?'), message: tn(entries.length, '"{name}" and its {n} logged entry will be deleted.', '"{name}" and its {n} logged entries will be deleted.', { name: p.name }), confirmLabel: t('Delete'), danger: true }))) return;
+    const { restore } = removeProperty(data, p.id);
+    update((d) => removeProperty(d, p.id).data);
+    toast(<>{t('Deleted:')} <b>{p.name}</b></>, { undo: () => update(restore) });
+  };
   const add = () => {
     if (!a || !isDay(date)) return;
     const e: PropertyEntry = { id: uid(), propertyId: p.id, date, kind, amount: a, label: label.trim() || (kind === 'rent' ? 'Rent' : kind === 'loan' ? 'Mortgage' : 'Expense') };
     update((d) => ({ ...d, propertyEntries: [e, ...d.propertyEntries] }));
-    toast(<>{e.label} · <b>{m(a)}</b> logged</>, { undo: () => update((d) => ({ ...d, propertyEntries: d.propertyEntries.filter((x) => x.id !== e.id) })) });
+    toast(<>{t('Logged:')} {t(e.label)} · <b>{m(a)}</b></>, { undo: () => update((d) => ({ ...d, propertyEntries: d.propertyEntries.filter((x) => x.id !== e.id) })) });
     setAmount('');
     setLabel('');
   };
   const remove = (e: PropertyEntry) => {
     const { restore } = removeRow(data, 'propertyEntries', e.id);
     update((d) => removeRow(d, 'propertyEntries', e.id).data);
-    toast('Entry deleted', { undo: () => update(restore) });
+    toast(t('Entry deleted'), { undo: () => update(restore) });
   };
   const max = Math.max(1, ...s.months.map((x) => Math.max(x.rent, x.out)));
   return (
@@ -754,26 +788,27 @@ function PropertyCard({ p, s, color, data, update, open, onToggle, onEdit, onLog
           <svg className="fold-chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
           <span>
             <span className="card-title" style={{ fontSize: '1rem' }}>{p.name}</span>
-            <span className="small" style={{ display: 'block' }}>{[p.city, p.purchaseDate ? `bought ${fmtDate(p.purchaseDate)}` : '', c].filter(Boolean).join(' · ')}</span>
+            <span className="small" style={{ display: 'block' }}>{[p.city, p.purchaseDate ? t('bought {date}', { date: fmtDate(p.purchaseDate) }) : '', c].filter(Boolean).join(' · ')}</span>
           </span>
         </button>
         <div className="row">
-          <button className="btn sm outline" onClick={onLog}><IconPlus size={12} /> Log this month</button>
-          <button className="icon-btn" onClick={onEdit} aria-label={`Edit ${p.name}`} title="Edit"><IconPencil /></button>
+          <button className="btn sm outline" onClick={onLog}><IconPlus size={12} /> {t('Log this month')}</button>
+          <button className="icon-btn" onClick={onEdit} aria-label={t('Edit {name}', { name: p.name })} title={t('Edit')}><IconPencil /></button>
+          <button className="icon-btn danger" onClick={() => void delProp()} aria-label={t('Delete {name}', { name: p.name })} title={t('Delete')}><IconTrash /></button>
         </div>
       </div>
       <div className="prop-stats">
-        <div><span className="small">Value</span><b>{m(p.value)}</b>{s.appreciation ? <span className="small" style={{ color: tone(s.appreciation) }}>{signed(s.appreciation, c)} since purchase</span> : null}</div>
-        <div><span className="small">Equity</span><b>{m(s.equity)}</b><span className="small">{m(p.debt)} owed</span></div>
-        <div><span className="small">Cash flow / month</span><b style={{ color: tone(s.cashflow) }}>{m(s.cashflow)}</b><span className="small">{m(p.rent)} rent</span></div>
-        <div><span className="small">Yield</span><b>{s.grossYield !== null ? pct(s.grossYield) : '—'}</b><span className="small">gross · {s.netYield !== null ? pct(s.netYield) : '—'} net</span></div>
-        <div><span className="small">Generated</span><b style={{ color: tone(s.totalAll) }}>{m(s.totalAll)}</b><span className="small">net, all logged months</span></div>
+        <div><span className="small">{t('Value')}</span><b>{m(p.value)}</b>{s.appreciation ? <span className="small" style={{ color: tone(s.appreciation) }}>{t('{amount} since purchase', { amount: signed(s.appreciation, c) })}</span> : null}</div>
+        <div><span className="small">{t('Equity')}</span><b>{m(s.equity)}</b><span className="small">{t('{amount} owed', { amount: m(p.debt) })}</span></div>
+        <div><span className="small">{t('Cash flow / month')}</span><b style={{ color: tone(s.cashflow) }}>{m(s.cashflow)}</b><span className="small">{t('{amount} rent', { amount: m(p.rent) })}</span></div>
+        <div><span className="small">{t('Yield')}</span><b>{s.grossYield !== null ? pct(s.grossYield) : '—'}</b><span className="small">{t('gross · {net} net', { net: s.netYield !== null ? pct(s.netYield) : '—' })}</span></div>
+        <div><span className="small">{t('Generated')}</span><b style={{ color: tone(s.totalAll) }}>{m(s.totalAll)}</b><span className="small">{t('net, all logged months')}</span></div>
       </div>
       {open && (
         <>
-          <div className="prop-months" aria-label="Rent and costs per month">
+          <div className="prop-months" aria-label={t('Rent and costs per month')}>
             {s.months.map((x) => (
-              <div key={x.k} className="prop-month" title={`${fmtMonth(x.k, true)}: ${m(x.rent)} in · ${m(x.out)} out · ${m(x.net)} net`}>
+              <div key={x.k} className="prop-month" title={t('{month}: {in} in · {out} out · {net} net', { month: fmtMonth(x.k, true), in: m(x.rent), out: m(x.out), net: m(x.net) })}>
                 <div className="prop-bars">
                   <span className="in" style={{ height: `${(x.rent / max) * 100}%` }} />
                   <span className="out" style={{ height: `${(x.out / max) * 100}%` }} />
@@ -783,25 +818,25 @@ function PropertyCard({ p, s, color, data, update, open, onToggle, onEdit, onLog
               </div>
             ))}
           </div>
-          <div className="chart-legend"><span><span className="swatch" style={{ background: 'var(--c-pos)' }} />Rent</span><span><span className="swatch" style={{ background: 'var(--c-exp)' }} />Expenses + loan</span></div>
+          <div className="chart-legend"><span><span className="swatch" style={{ background: 'var(--c-pos)' }} />{t('Rent')}</span><span><span className="swatch" style={{ background: 'var(--c-exp)' }} />{t('Expenses + loan')}</span></div>
           {p.notes && <div className="small client-notes">{p.notes}</div>}
           <form className="time-form" onSubmit={(e) => { e.preventDefault(); add(); }}>
-            <Seg label="Kind" value={kind} onChange={setKind} options={[['rent', 'Rent'], ['expense', 'Expense'], ['loan', 'Loan']]} />
-            <div className="note-ctl"><DatePicker value={date} onChange={setDate} clearable={false} size="sm" ariaLabel="Date" /></div>
-            <input className="input time-dur" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={`Amount (${c})`} aria-label="Amount" />
-            <input className="input time-note" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Label (repairs, tax, insurance…)" aria-label="Label" />
-            <button className="btn sm" type="submit" disabled={!a}>Add</button>
+            <Seg label={t('Kind')} value={kind} onChange={setKind} options={[['rent', t('Rent')], ['expense', t('Expense')], ['loan', t('Loan')]]} />
+            <div className="note-ctl"><DatePicker value={date} onChange={setDate} clearable={false} size="sm" ariaLabel={t('Date')} /></div>
+            <input className="input time-dur" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={t('Amount ({currency})', { currency: c })} aria-label={t('Amount')} />
+            <input className="input time-note" value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t('Label (repairs, tax, insurance…)')} aria-label={t('Label')} />
+            <button className="btn sm" type="submit" disabled={!a}>{t('Add')}</button>
           </form>
           <div className="time-list">
             {entries.slice(0, 12).map((e) => (
               <div className="time-row" key={e.id}>
                 <span className="time-date">{fmtDate(e.date, true)} {e.date.slice(2, 4)}</span>
-                <span className="ellipsis time-what"><span className={'op-side ' + (e.kind === 'rent' ? 'buy' : 'sell')}>{e.kind === 'rent' ? 'Rent' : e.kind === 'loan' ? 'Loan' : 'Expense'}</span>{e.label}</span>
+                <span className="ellipsis time-what"><span className={'op-side ' + (e.kind === 'rent' ? 'buy' : 'sell')}>{e.kind === 'rent' ? t('Rent') : e.kind === 'loan' ? t('Loan') : t('Expense')}</span>{t(e.label)}</span>
                 <b className="time-dur-v" style={{ color: e.kind === 'rent' ? 'var(--green)' : undefined }}>{e.kind === 'rent' ? '+' : '−'} {m(e.amount)}</b>
-                <button className="x" onClick={() => remove(e)} aria-label="Delete entry">×</button>
+                <button className="x" onClick={() => remove(e)} aria-label={t('Delete entry')}>×</button>
               </div>
             ))}
-            {entries.length === 0 && <div className="empty">Nothing logged yet. "Log this month" adds the rent, loan and charges from the property's settings.</div>}
+            {entries.length === 0 && <div className="empty">{t('Nothing logged yet. "Log this month" adds the rent, loan and charges from the property\'s settings.')}</div>}
           </div>
         </>
       )}
@@ -823,13 +858,13 @@ function PropertyModal({ property, data, update, onClose }: { property: Property
     const next: Property = { ...f, name, city: f.city.trim(), ...(parsed as Record<keyof typeof vals, number>) };
     if (!next.value) next.value = next.purchasePrice;
     update((d) => ({ ...d, properties: creating ? [...d.properties, next] : d.properties.map((p) => (p.id === next.id ? next : p)) }));
-    toast(<><b>{name}</b> {creating ? 'added' : 'saved'}</>, { tone: 'success' });
+    toast(<>{creating ? t('Added:') : t('Saved:')} <b>{name}</b></>, { tone: 'success' });
     onClose();
   };
   const remove = () => {
     const { restore } = removeProperty(data, property.id);
     update((d) => removeProperty(d, property.id).data);
-    toast(<><b>{property.name}</b> deleted</>, { undo: () => update(restore) });
+    toast(<>{t('Deleted:')} <b>{property.name}</b></>, { undo: () => update(restore) });
     onClose();
   };
   const field = (k: keyof typeof vals, label: string, ph?: string) => (
@@ -838,27 +873,27 @@ function PropertyModal({ property, data, update, onClose }: { property: Property
     </Field>
   );
   return (
-    <Modal title={creating ? 'New property' : 'Edit property'} onClose={onClose}>
+    <Modal title={creating ? t('New property') : t('Edit property')} onClose={onClose}>
       <form className="section" onSubmit={(e) => { e.preventDefault(); save(); }}>
         <div className="form-grid">
-          <Field label="Name"><input className="input" autoFocus={creating} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Apartment Maarif" /></Field>
-          <Field label="City"><input className="input" value={f.city} onChange={(e) => setF({ ...f, city: e.target.value })} placeholder="Casablanca" /></Field>
-          <Field label="Currency"><Select value={f.currency} onChange={(currency) => setF({ ...f, currency })} options={CURRENCY_OPTIONS} ariaLabel="Currency" /></Field>
-          <Field label="Bought on"><DatePicker value={f.purchaseDate} onChange={(purchaseDate) => setF({ ...f, purchaseDate })} placeholder="Date" ariaLabel="Bought on" /></Field>
-          {field('purchasePrice', 'Purchase price', 'With fees')}
-          {field('value', 'Value today', 'Estimate')}
-          {field('debt', 'Loan still owed')}
-          {field('rent', 'Rent / month')}
-          {field('charges', 'Charges / month', 'Syndic, tax, insurance…')}
-          {field('loan', 'Loan payment / month')}
+          <Field label={t('Name')}><input className="input" autoFocus={creating} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder={t('Apartment Maarif')} /></Field>
+          <Field label={t('City')}><input className="input" value={f.city} onChange={(e) => setF({ ...f, city: e.target.value })} placeholder="Casablanca" /></Field>
+          <Field label={t('Currency')}><Select value={f.currency} onChange={(currency) => setF({ ...f, currency })} options={CURRENCY_OPTIONS} ariaLabel={t('Currency')} /></Field>
+          <Field label={t('Bought on')}><DatePicker value={f.purchaseDate} onChange={(purchaseDate) => setF({ ...f, purchaseDate })} placeholder={t('Date')} ariaLabel={t('Bought on')} /></Field>
+          {field('purchasePrice', t('Purchase price'), t('With fees'))}
+          {field('value', t('Value today'), t('Estimate'))}
+          {field('debt', t('Loan still owed'))}
+          {field('rent', t('Rent / month'))}
+          {field('charges', t('Charges / month'), t('Syndic, tax, insurance…'))}
+          {field('loan', t('Loan payment / month'))}
         </div>
-        <Field label="Notes"><textarea className="input" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} placeholder="Tenant, lease end, works planned…" /></Field>
-        {bad && <div className="small form-error">One of the amounts isn't valid. Examples: 1200000 · 6 500 · 650.50</div>}
+        <Field label={t('Notes')}><textarea className="input" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} placeholder={t('Tenant, lease end, works planned…')} /></Field>
+        {bad && <div className="small form-error">{t("One of the amounts isn't valid. Examples: 1200000 · 6 500 · 650.50")}</div>}
         <div className="modal-foot">
-          {creating ? <span /> : <button className="btn sm danger" type="button" onClick={remove}>Delete property</button>}
+          {creating ? <span /> : <button className="btn sm danger" type="button" onClick={remove}>{t('Delete property')}</button>}
           <div className="row" style={{ gap: '0.5rem' }}>
-            <button className="btn sm ghost" type="button" onClick={onClose}>Cancel</button>
-            <button className="btn sm" type="submit" disabled={!f.name.trim() || bad}>{creating ? 'Add property' : 'Save'}</button>
+            <button className="btn sm ghost" type="button" onClick={onClose}>{t('Cancel')}</button>
+            <button className="btn sm" type="submit" disabled={!f.name.trim() || bad}>{creating ? t('Add property') : t('Save')}</button>
           </div>
         </div>
       </form>

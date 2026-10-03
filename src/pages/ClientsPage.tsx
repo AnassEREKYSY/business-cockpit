@@ -1,13 +1,17 @@
 import { Fragment, useMemo, useState } from 'react';
 import { ClientModal } from '../components/ClientModal';
 import { Donut, HBars, StackedBars, compactMoney } from '../components/Charts';
-import { Seg } from '../components/ui';
+import { IconTrash, Seg } from '../components/ui';
+import { useConfirm } from '../components/Confirm';
+import { useToast } from '../components/Toast';
+import { removeClient } from '../lib/undo';
 import { allTxns } from '../lib/finance';
 import { fmtDate, fmtMonth, money, monthKey, pct, shiftMonth } from '../lib/format';
 import { isUnpaid } from '../lib/stats';
 import { taxOf } from '../lib/tax';
 import { entryMinutes, fmtDuration } from '../lib/time';
 import type { AppData, Client } from '../types';
+import { t, tn } from '../lib/i18n';
 
 type Update = (fn: (d: AppData) => AppData) => void;
 type Period = '12m' | 'year' | 'all';
@@ -32,11 +36,29 @@ export default function ClientsPage({ data, update, openProject }: { data: AppDa
   const [period, setPeriod] = useState<Period>('12m');
   const [open, setOpen] = useState<string | null>(null);
   const [editing, setEditing] = useState<Client | null>(null);
+  const confirm = useConfirm();
+  const toast = useToast();
+  const removeC = async (c: Client) => {
+    const ok = await confirm({
+      title: t('Delete this client?'),
+      message: t('"{name}" will be deleted. Its projects, tasks and transactions stay, with no client.', { name: c.name }),
+      confirmLabel: t('Delete'),
+      danger: true,
+    });
+    if (!ok) return;
+    const { restore } = removeClient(data, c.id);
+    update((d) => removeClient(d, c.id).data);
+    setOpen(null);
+    toast(<>{t('Client deleted:')} <b>{c.name}</b></>, { undo: () => update(restore) });
+  };
   const cur = data.profile.currency;
   const m = (n: number) => money(n, cur);
   const thisMonth = monthKey();
   const from = { '12m': shiftMonth(thisMonth, -11) + '-01', year: `${thisMonth.slice(0, 4)}-01-01`, all: '0000' }[period];
 
+  // Translated outside the memo so the labels follow the language.
+  const noClient = t('No client');
+  const otherLabel = t('Other');
   const { rows, months, monthly, total } = useMemo(() => {
     const projectClient = new Map(data.projects.map((p) => [p.id, p.clientId]));
     const clientOf = (t: { clientId?: string; projectId: string }) => t.clientId || projectClient.get(t.projectId) || '';
@@ -46,7 +68,7 @@ export default function ClientsPage({ data, update, openProject }: { data: AppDa
       if (!r) {
         const c = data.clients.find((x) => x.id === id);
         r = {
-          id: id || NONE, name: c?.name ?? 'No client', color: c?.color ?? 'var(--line-strong)', client: c,
+          id: id || NONE, name: c?.name ?? noClient, color: c?.color ?? 'var(--line-strong)', client: c,
           revenue: 0, costs: 0, tax: 0, minutes: 0, unpaid: 0, last: '', projects: new Map(),
         };
         byId.set(id || NONE, r);
@@ -93,7 +115,7 @@ export default function ClientsPage({ data, update, openProject }: { data: AppDa
     const all12 = allTxns(data).filter((t) => t.type === 'revenue' && t.date >= months[0] + '-01');
     const monthly = [
       ...top.map((r) => ({ id: r.id, label: r.name, color: r.color, values: months.map(() => 0) })),
-      { id: 'other', label: 'Other', color: 'var(--c-exp)', values: months.map(() => 0) },
+      { id: 'other', label: otherLabel, color: 'var(--c-exp)', values: months.map(() => 0) },
     ];
     for (const t of all12) {
       const k = months.indexOf(t.date.slice(0, 7));
@@ -104,11 +126,11 @@ export default function ClientsPage({ data, update, openProject }: { data: AppDa
     }
     const total = rows.reduce((a, r) => a + r.revenue, 0);
     return { rows, months, monthly: monthly.filter((s) => s.values.some((v) => v > 0)), total };
-  }, [data, from, thisMonth]);
+  }, [data, from, thisMonth, noClient, otherLabel]);
 
   const paying = rows.filter((r) => r.revenue > 0 && r.id !== NONE);
   const top = paying[0];
-  const projectName = (id: string) => data.projects.find((p) => p.id === id)?.name ?? 'Unknown project';
+  const projectName = (id: string) => data.projects.find((p) => p.id === id)?.name ?? t('Unknown project');
   const projectRows = rows
     .flatMap((r) => [...r.projects.entries()].map(([id, p]) => ({ id, ...p, color: r.color, client: r.name })))
     .filter((p) => p.revenue > 0)
@@ -119,32 +141,32 @@ export default function ClientsPage({ data, update, openProject }: { data: AppDa
     <section className="section loose">
       <div className="head">
         <div className="head-title">
-          <h1>Clients</h1>
-          <span className="sub">What each client and project brings in</span>
+          <h1>{t('Clients')}</h1>
+          <span className="sub">{t('What each client and project brings in')}</span>
         </div>
-        <Seg label="Period" value={period} onChange={setPeriod} options={[['12m', '12 months'], ['year', 'This year'], ['all', 'All time']]} />
+        <Seg label={t('Period')} value={period} onChange={setPeriod} options={[['12m', t('12 months')], ['year', t('This year')], ['all', t('All time')]]} />
       </div>
 
       <div className="kpis">
         <div className="kpi">
-          <div className="kpi-k">Revenue from clients</div>
+          <div className="kpi-k">{t('Revenue from clients')}</div>
           <div className="kpi-v">{m(total)}</div>
-          <div className="kpi-s">{m(rows.reduce((a, r) => a + r.revenue - r.tax, 0))} after taxes</div>
+          <div className="kpi-s">{t('{amount} after taxes', { amount: m(rows.reduce((a, r) => a + r.revenue - r.tax, 0)) })}</div>
         </div>
         <div className="kpi">
-          <div className="kpi-k">Paying clients</div>
+          <div className="kpi-k">{t('Paying clients')}</div>
           <div className="kpi-v">{paying.length}</div>
-          <div className="kpi-s">{paying.length ? `${m(total / paying.length)} on average` : 'No revenue in this period'}</div>
+          <div className="kpi-s">{paying.length ? t('{amount} on average', { amount: m(total / paying.length) }) : t('No revenue in this period')}</div>
         </div>
         <div className="kpi">
-          <div className="kpi-k">Biggest client</div>
+          <div className="kpi-k">{t('Biggest client')}</div>
           <div className="kpi-v ellipsis" style={{ fontSize: '1.125rem' }}>{top?.name ?? '—'}</div>
           <div className="kpi-s" style={{ color: top && total && top.revenue / total > 0.5 ? 'var(--amber)' : undefined }}>
-            {top && total ? `${pct((top.revenue / total) * 100)} of your revenue${top.revenue / total > 0.5 ? ' · high dependency' : ''}` : '—'}
+            {top && total ? t(top.revenue / total > 0.5 ? '{pct} of your revenue · high dependency' : '{pct} of your revenue', { pct: pct((top.revenue / total) * 100) }) : '—'}
           </div>
         </div>
         <div className="kpi">
-          <div className="kpi-k">Best rate</div>
+          <div className="kpi-k">{t('Best rate')}</div>
           {(() => {
             const best = [...paying].filter((r) => r.minutes >= 60).sort((a, b) => (b.revenue - b.costs) / b.minutes - (a.revenue - a.costs) / a.minutes)[0];
             return best ? (
@@ -155,7 +177,7 @@ export default function ClientsPage({ data, update, openProject }: { data: AppDa
             ) : (
               <>
                 <div className="kpi-v">—</div>
-                <div className="kpi-s">Track time to compare</div>
+                <div className="kpi-s">{t('Track time to compare')}</div>
               </>
             );
           })()}
@@ -163,14 +185,14 @@ export default function ClientsPage({ data, update, openProject }: { data: AppDa
       </div>
 
       {rows.length === 0 ? (
-        <div className="empty">No client revenue in this period. Link your transactions to a project or a client to see them here.</div>
+        <div className="empty">{t('No client revenue in this period. Link your transactions to a project or a client to see them here.')}</div>
       ) : (
         <>
           <div className="grid-2 stretch">
             <div className="card" style={{ gap: '1rem' }}>
               <div className="head">
-                <div className="card-title">Revenue by client</div>
-                <span className="small">Click a client for its notes and contacts</span>
+                <div className="card-title">{t('Revenue by client')}</div>
+                <span className="small">{t('Click a client for its notes and contacts')}</span>
               </div>
               <HBars
                 format={m}
@@ -184,8 +206,8 @@ export default function ClientsPage({ data, update, openProject }: { data: AppDa
                     onClick: r.client ? () => setEditing(r.client!) : undefined,
                     sub: (
                       <>
-                        {r.projects.size} {r.projects.size === 1 ? 'project' : 'projects'}
-                        {r.revenue ? ` · ${pct(((r.revenue - r.costs) / r.revenue) * 100)} margin` : ''}
+                        {tn(r.projects.size, '{n} project', '{n} projects')}
+                        {r.revenue ? ` · ${t('{pct} margin', { pct: pct(((r.revenue - r.costs) / r.revenue) * 100) })}` : ''}
                         {r.minutes >= 1 ? ` · ${fmtDuration(r.minutes)} · ${m((r.revenue - r.costs) / (r.minutes / 60))}/h` : ''}
                       </>
                     ),
@@ -193,23 +215,23 @@ export default function ClientsPage({ data, update, openProject }: { data: AppDa
               />
             </div>
             <div className="card" style={{ gap: '1rem' }}>
-              <div className="card-title">Share of revenue</div>
+              <div className="card-title">{t('Share of revenue')}</div>
               <Donut
                 format={m}
                 slices={rows.filter((r) => r.revenue > 0).slice(0, 7).concat(
                   rows.filter((r) => r.revenue > 0).length > 7
-                    ? [{ ...rows[0], id: 'rest', name: 'Others', color: 'var(--c-exp)', revenue: rows.filter((r) => r.revenue > 0).slice(7).reduce((a, r) => a + r.revenue, 0) }]
+                    ? [{ ...rows[0], id: 'rest', name: t('Others'), color: 'var(--c-exp)', revenue: rows.filter((r) => r.revenue > 0).slice(7).reduce((a, r) => a + r.revenue, 0) }]
                     : [],
                 ).map((r) => ({ id: r.id, label: r.name, value: r.revenue, color: r.color }))}
-                center={<><b>{paying.length}</b><span>clients</span></>}
+                center={<><b>{paying.length}</b><span>{tn(paying.length, 'client', 'clients')}</span></>}
               />
             </div>
           </div>
 
           <div className="card" style={{ gap: '1rem' }}>
             <div className="head">
-              <div className="card-title">Monthly revenue by client</div>
-              <span className="small">Last 12 months · hover a month for the detail</span>
+              <div className="card-title">{t('Monthly revenue by client')}</div>
+              <span className="small">{t('Last 12 months · hover a month for the detail')}</span>
             </div>
             <StackedBars labels={months.map((k) => fmtMonth(k))} series={monthly} format={(n) => compactMoney(n, cur)} />
             <div className="chart-legend">
@@ -221,7 +243,7 @@ export default function ClientsPage({ data, update, openProject }: { data: AppDa
 
           <div className="grid-2 stretch">
             <div className="card" style={{ gap: '1rem' }}>
-              <div className="card-title">Top projects</div>
+              <div className="card-title">{t('Top projects')}</div>
               {projectRows.length ? (
                 <HBars
                   format={m}
@@ -231,15 +253,15 @@ export default function ClientsPage({ data, update, openProject }: { data: AppDa
                     value: p.revenue,
                     color: p.color,
                     onClick: () => openProject(p.id),
-                    sub: `${p.client} · ${pct(((p.revenue - p.costs) / p.revenue) * 100)} margin${p.minutes >= 1 ? ` · ${fmtDuration(p.minutes)}` : ''}`,
+                    sub: `${p.client} · ${t('{pct} margin', { pct: pct(((p.revenue - p.costs) / p.revenue) * 100) })}${p.minutes >= 1 ? ` · ${fmtDuration(p.minutes)}` : ''}`,
                   }))}
                 />
               ) : (
-                <div className="small">No revenue linked to a project in this period.</div>
+                <div className="small">{t('No revenue linked to a project in this period.')}</div>
               )}
             </div>
             <div className="card" style={{ gap: '1rem' }}>
-              <div className="card-title">Margin by client</div>
+              <div className="card-title">{t('Margin by client')}</div>
               <HBars
                 format={m}
                 items={rows
@@ -251,7 +273,7 @@ export default function ClientsPage({ data, update, openProject }: { data: AppDa
                     label: r.name,
                     value: Math.max(0, r.margin),
                     color: r.color,
-                    sub: `${m(r.revenue)} revenue − ${m(r.costs)} costs − ${m(r.tax)} taxes`,
+                    sub: t('{revenue} revenue − {costs} costs − {tax} taxes', { revenue: m(r.revenue), costs: m(r.costs), tax: m(r.tax) }),
                   }))}
               />
             </div>
@@ -259,13 +281,13 @@ export default function ClientsPage({ data, update, openProject }: { data: AppDa
 
           <div className="card" style={{ gap: '0.375rem' }}>
             <div className="head">
-              <div className="card-title">All clients</div>
-              <span className="small">Click a row to see its projects</span>
+              <div className="card-title">{t('All clients')}</div>
+              <span className="small">{t('Click a row to see its projects')}</span>
             </div>
             <div className="table-wrap">
               <div className="trow th t-clients">
-                <span>Client</span><span className="r">Revenue</span><span className="r">Costs</span><span className="r">Taxes</span><span className="r">Net</span>
-                <span className="r">Time</span><span className="r">Per hour</span><span className="r">To collect</span><span>Last payment</span>
+                <span>{t('Client')}</span><span className="r">{t('Revenue')}</span><span className="r">{t('Costs')}</span><span className="r">{t('Taxes')}</span><span className="r">{t('Net')}</span>
+                <span className="r">{t('Time')}</span><span className="r">{t('Per hour')}</span><span className="r">{t('To collect')}</span><span>{t('Last payment')}</span>
               </div>
               {rows.map((r) => {
                 const net = r.revenue - r.costs - r.tax;
@@ -299,10 +321,11 @@ export default function ClientsPage({ data, update, openProject }: { data: AppDa
                             <span /><span />
                           </button>
                         ))}
-                        {r.projects.size === 0 && <div className="small" style={{ padding: '0.5rem 0.75rem' }}>No project linked: revenue entered directly for this client.</div>}
+                        {r.projects.size === 0 && <div className="small" style={{ padding: '0.5rem 0.75rem' }}>{t('No project linked: revenue entered directly for this client.')}</div>}
                         {r.client && (
                           <div className="row" style={{ padding: '0.5rem 0.75rem', gap: '0.5rem' }}>
-                            <button className="btn sm outline" onClick={() => setEditing(r.client!)}>Notes &amp; contacts ({r.client.contacts.length})</button>
+                            <button className="btn sm outline" onClick={() => setEditing(r.client!)}>{t('Notes & contacts ({n})', { n: r.client.contacts.length })}</button>
+                            <button className="btn sm danger" style={{ marginLeft: 'auto' }} onClick={() => void removeC(r.client!)}><IconTrash size={12} /> {t('Delete client')}</button>
                           </div>
                         )}
                       </div>

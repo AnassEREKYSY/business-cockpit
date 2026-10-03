@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
+import { t } from '../lib/i18n';
 import { PALETTE } from '../lib/colors';
 import { Popover } from './Popover';
 
 /** Swatch button that opens the label palette plus a free color picker. */
-export function ColorPicker({ value, onChange, label = 'Colour' }: { value: string; onChange: (hex: string) => void; label?: string }) {
+export function ColorPicker({ value, onChange, label = t('Colour') }: { value: string; onChange: (hex: string) => void; label?: string }) {
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -52,9 +53,9 @@ export function ColorPicker({ value, onChange, label = 'Colour' }: { value: stri
               onClick={() => choose(c)}
             />
           ))}
-          <label className={'palette-custom' + (custom ? ' is-on' : '')} title="Pick another colour">
+          <label className={'palette-custom' + (custom ? ' is-on' : '')} title={t('Pick another colour')}>
             <span style={{ background: custom ? value : 'conic-gradient(#e0525a, #e9a23b, #7ab83a, #22a6c9, #8b6fe8, #dd5aa6, #e0525a)' }} />
-            Other colour
+            {t('Other colour')}
             <input type="color" value={value} onChange={(e) => onChange(e.target.value.toLowerCase())} />
           </label>
         </div>

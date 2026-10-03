@@ -13,6 +13,7 @@ import { isOverdue, unpaidInvoices } from '../lib/stats';
 import { ARCHIVE_AFTER_DAYS, isArchived, isDay, nextPosition, placeTask, topPosition } from '../lib/store';
 import { entryMinutes, fmtClock, fmtDuration, runningEntry, startTimer, stopTimers, sumMinutes, useNow, weekStart } from '../lib/time';
 import { removeProject, removeRow } from '../lib/undo';
+import { locale, t, tn } from '../lib/i18n';
 import type { AppData, Project, Task, TaskColumn } from '../types';
 
 type Update = (fn: (d: AppData) => AppData) => void;
@@ -28,7 +29,7 @@ const emptyProject = (): Omit<Project, 'id' | 'position'> => ({
   name: '', clientId: '', start: isoDate(), deadline: '', status: 'Not started',
   brief: { context: '', goal: '', deliverables: '', out: '' }, budget: 0,
 });
-const STATUS_OPTIONS = PROJECT_STATUSES.map((s) => ({ value: s, label: statusLabel(s), color: STATUS_META[s].color }));
+const statusOptions = () => PROJECT_STATUSES.map((s) => ({ value: s, label: statusLabel(s), color: STATUS_META[s].color }));
 
 const DAY_MS = 86_400_000;
 const addDays = (iso: string, n: number) => isoDate(new Date(new Date(iso + 'T12:00:00').getTime() + n * DAY_MS));
@@ -37,10 +38,10 @@ const daysBetween = (a: string, b: string) => Math.round((Date.parse(b + 'T12:00
 /** "Today", "Tomorrow", "3d overdue", "Fri", "12 Oct". */
 export function dueLabel(due: string, today = isoDate()): string {
   const n = daysBetween(today, due);
-  if (n === 0) return 'Today';
-  if (n === 1) return 'Tomorrow';
-  if (n < 0) return n === -1 ? 'Yesterday' : `${-n}d overdue`;
-  if (n < 7) return new Date(due + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'short' });
+  if (n === 0) return t('Today');
+  if (n === 1) return t('Tomorrow');
+  if (n < 0) return n === -1 ? t('Yesterday') : t('{n}d overdue', { n: -n });
+  if (n < 7) return new Date(due + 'T12:00:00').toLocaleDateString(locale(), { weekday: 'short' });
   return fmtDate(due, true);
 }
 
@@ -79,7 +80,7 @@ export default function OverviewPage({ data, update, openProject, goFinances }: 
 /* ---------------- Dashboard ---------------- */
 
 function greeting(hour = new Date().getHours()) {
-  return hour < 5 ? 'Good night' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  return hour < 5 ? t('Good night') : hour < 12 ? t('Good morning') : hour < 18 ? t('Good afternoon') : t('Good evening');
 }
 
 function Dashboard({ data, openTask, openProject, showOnBoard, goFinances }: {
@@ -139,11 +140,15 @@ function Dashboard({ data, openTask, openProject, showOnBoard, goFinances }: {
   const clientOf = (id: string) => data.clients.find((c) => c.id === id);
 
   const summary =
-    dueToday || overdue
-      ? `${dueToday ? `${dueToday} ${dueToday === 1 ? 'task' : 'tasks'} due today` : 'Nothing due today'}${overdue ? `, ${overdue} overdue` : ''}.`
-      : open.length
-        ? `Nothing due today. ${open.length} open ${open.length === 1 ? 'task' : 'tasks'} on the board.`
-        : 'Your board is clear.';
+    dueToday && overdue
+      ? tn(dueToday, '{n} task due today, {late} overdue.', '{n} tasks due today, {late} overdue.', { late: overdue })
+      : dueToday
+        ? tn(dueToday, '{n} task due today.', '{n} tasks due today.')
+        : overdue
+          ? t('Nothing due today, {n} overdue.', { n: overdue })
+          : open.length
+            ? tn(open.length, 'Nothing due today. {n} open task on the board.', 'Nothing due today. {n} open tasks on the board.')
+            : t('Your board is clear.');
 
   return (
     <section className="dash">
@@ -157,50 +162,50 @@ function Dashboard({ data, openTask, openProject, showOnBoard, goFinances }: {
       <div className="dash-grid">
         <div className="tiles">
           <button className="tile" onClick={() => showOnBoard({ due: 'today' })}>
-            <span className="tile-k">Due today</span>
+            <span className="tile-k">{t('Due today')}</span>
             <span className="tile-v">{dueToday}</span>
             <span className="tile-s">
               {overdue ? (
                 <span className="neg" role="link" tabIndex={-1} onClick={(e) => { e.stopPropagation(); showOnBoard({ due: 'overdue' }); }}>
-                  {overdue} overdue · show
+                  {t('{n} overdue · show', { n: overdue })}
                 </span>
-              ) : 'Nothing overdue'}
+              ) : t('Nothing overdue')}
             </span>
           </button>
 
           <button className="tile" onClick={goFinances}>
-            <span className="tile-k">Revenue in {fmtMonth(monthKey())}</span>
+            <span className="tile-k">{t('Revenue in {month}', { month: fmtMonth(monthKey()) })}</span>
             <span className="tile-v">{m(thisRev)}</span>
             {goal > 0 ? (
               <span className="tile-goal">
                 <span className="goal-bar"><span style={{ width: `${Math.min(100, (thisRev / goal) * 100)}%` }} /></span>
-                <span className="tile-s">{pct((thisRev / goal) * 100)} of {m(goal)} goal</span>
+                <span className="tile-s">{t('{p} of {goal} goal', { p: pct((thisRev / goal) * 100), goal: m(goal) })}</span>
               </span>
             ) : (
               <span className="tile-s">
-                {lastRev ? <>{fmtMonth(lastKey)}: {m(lastRev)}{delta !== null && delta > 0 ? <span className="pos"> · already ▲ {pct(delta)}</span> : null}</> : 'Nothing last month'}
+                {lastRev ? <>{fmtMonth(lastKey)}: {m(lastRev)}{delta !== null && delta > 0 ? <span className="pos"> · {t('already ▲ {p}', { p: pct(delta) })}</span> : null}</> : t('Nothing last month')}
               </span>
             )}
           </button>
 
           <button className="tile" onClick={goFinances}>
-            <span className="tile-k">To collect</span>
+            <span className="tile-k">{t('To collect')}</span>
             <span className="tile-v">{m(toCollect)}</span>
             <span className="tile-s">
               {unpaid.length ? (
-                <>{unpaid.length} unpaid {unpaid.length === 1 ? 'invoice' : 'invoices'}{late ? <span className="neg"> · {late} late</span> : ''}</>
-              ) : 'All invoices paid'}
+                <>{tn(unpaid.length, '{n} unpaid invoice', '{n} unpaid invoices')}{late ? <span className="neg"> · {t('{n} late', { n: late })}</span> : ''}</>
+              ) : t('All invoices paid')}
             </span>
           </button>
 
           <div className="tile tile-static">
-            <span className="tile-k">This week</span>
+            <span className="tile-k">{t('This week')}</span>
             <span className="tile-v">{fmtDuration(weekMin)}</span>
-            <span className="week-bars" aria-label="Hours tracked per day this week">
+            <span className="week-bars" aria-label={t('Hours tracked per day this week')}>
               {days.map((x) => (
                 <span key={x.d} className={'week-bar' + (x.d === today ? ' is-today' : '')} title={`${fmtDate(x.d, true)}: ${fmtDuration(x.min)}`}>
                   <span style={{ height: `${Math.max(x.min ? 8 : 3, (x.min / maxDay) * 100)}%` }} />
-                  <i>{'MTWTFSS'[daysBetween(mon, x.d)]}</i>
+                  <i>{t('MTWTFSS')[daysBetween(mon, x.d)]}</i>
                 </span>
               ))}
             </span>
@@ -209,10 +214,10 @@ function Dashboard({ data, openTask, openProject, showOnBoard, goFinances }: {
 
         <div className="card upcoming">
           <div className="head">
-            <div className="card-title">Coming up</div>
-            <span className="small">Next 14 days</span>
+            <div className="card-title">{t('Coming up')}</div>
+            <span className="small">{t('Next 14 days')}</span>
           </div>
-          {upcoming.length === 0 && <div className="small upcoming-empty">No deadlines in the next two weeks.</div>}
+          {upcoming.length === 0 && <div className="small upcoming-empty">{t('No deadlines in the next two weeks.')}</div>}
           {upcoming.map((u) => {
             const client = clientOf(u.clientId) ?? clientOf(projectOf(u.projectId)?.clientId ?? '');
             const n = daysBetween(today, u.date);
@@ -232,7 +237,7 @@ function Dashboard({ data, openTask, openProject, showOnBoard, goFinances }: {
                 <span className="up-main">
                   <span className="ellipsis up-title">{u.title}</span>
                   <span className="up-sub ellipsis">
-                    {u.kind === 'project' ? 'Project deadline' : projectOf(u.projectId)?.name ?? 'Task'}
+                    {u.kind === 'project' ? t('Project deadline') : projectOf(u.projectId)?.name ?? t('Task')}
                   </span>
                 </span>
                 {client && <span className="swatch" style={{ background: client.color }} title={client.name} />}
@@ -283,7 +288,7 @@ function Projects({ data, update, openProject }: { data: AppData; update: Update
       ...d,
       projects: [{ id: uid(), ...pf, name: pf.name.trim(), position: topPosition(d.projects) }, ...d.projects],
     }));
-    toast(<>Project <b>{pf.name.trim()}</b> created</>, { tone: 'success' });
+    toast(<>{t('Project created:')} <b>{pf.name.trim()}</b></>, { tone: 'success' });
     setPf(emptyProject());
     setShowForm(false);
   };
@@ -296,15 +301,15 @@ function Projects({ data, update, openProject }: { data: AppData; update: Update
     }));
   const remove = async (p: Project) => {
     const ok = await confirm({
-      title: 'Delete this project?',
-      message: <>"{p.name}" will be deleted, along with its brief and journal. Its tasks, transactions and tracked time are kept, with no project.</>,
-      confirmLabel: 'Delete',
+      title: t('Delete this project?'),
+      message: t('"{name}" will be deleted, along with its brief and journal. Its tasks, transactions and tracked time are kept, with no project.', { name: p.name }),
+      confirmLabel: t('Delete'),
       danger: true,
     });
     if (!ok) return;
     const { restore } = removeProject(data, p.id);
     update((d) => removeProject(d, p.id).data);
-    toast(<>Project <b>{p.name}</b> deleted</>, { undo: () => update(restore) });
+    toast(<>{t('Project deleted:')} <b>{p.name}</b></>, { undo: () => update(restore) });
   };
 
   return (
@@ -314,36 +319,36 @@ function Projects({ data, update, openProject }: { data: AppData; update: Update
           <svg className="fold-chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="m9 6 6 6-6 6" />
           </svg>
-          <h2>Active projects</h2>
-          <span className="sub">{activeCount} active · {data.projects.length} in total</span>
+          <h2>{t('Active projects')}</h2>
+          <span className="sub">{t('{a} active · {n} in total', { a: activeCount, n: data.projects.length })}</span>
         </button>
         {open && (
           <div className="row">
-            <Seg label="Filter projects" value={filter} onChange={setFilter} options={[['active', 'Active'], ['all', 'All'], ['done', 'Done']]} />
-            <button className="btn" onClick={() => setShowForm((v) => !v)} aria-expanded={showForm}>+ New project</button>
+            <Seg label={t('Filter projects')} value={filter} onChange={setFilter} options={[['active', t('Active')], ['all', t('All')], ['done', t('Done')]]} />
+            <button className="btn" onClick={() => setShowForm((v) => !v)} aria-expanded={showForm}>+ {t('New project')}</button>
           </div>
         )}
       </div>
 
       {open && showForm && (
         <form className="proj-form form-grid" onSubmit={(e) => { e.preventDefault(); add(); }}>
-          <Field label="Project name">
-            <input className="input" autoFocus value={pf.name} onChange={(e) => setPf({ ...pf, name: e.target.value })} placeholder="Website redesign…" />
+          <Field label={t('Project name')}>
+            <input className="input" autoFocus value={pf.name} onChange={(e) => setPf({ ...pf, name: e.target.value })} placeholder={t('Website redesign…')} />
           </Field>
-          <Field label="Client">
+          <Field label={t('Client')}>
             <ClientSelect data={data} update={update} value={pf.clientId} onChange={(clientId) => setPf({ ...pf, clientId })} />
           </Field>
-          <Field label="Start">
-            <DatePicker value={pf.start} onChange={(start) => setPf({ ...pf, start })} placeholder="No start date" ariaLabel="Start" />
+          <Field label={t('Start')}>
+            <DatePicker value={pf.start} onChange={(start) => setPf({ ...pf, start })} placeholder={t('No start date')} ariaLabel={t('Start')} />
           </Field>
-          <Field label="Due">
-            <DatePicker value={pf.deadline} onChange={(deadline) => setPf({ ...pf, deadline })} min={pf.start || undefined} placeholder="No due date" ariaLabel="Due" />
+          <Field label={t('Due')}>
+            <DatePicker value={pf.deadline} onChange={(deadline) => setPf({ ...pf, deadline })} min={pf.start || undefined} placeholder={t('No due date')} ariaLabel={t('Due')} />
           </Field>
-          <Field label="Status">
-            <Select value={pf.status} onChange={(status) => setPf({ ...pf, status })} options={STATUS_OPTIONS} ariaLabel="Status" />
+          <Field label={t('Status')}>
+            <Select value={pf.status} onChange={(status) => setPf({ ...pf, status })} options={statusOptions()} ariaLabel={t('Status')} />
           </Field>
-          <button className="btn dark tall" type="submit" disabled={!pf.name.trim() || dueBeforeStart(pf)}>Add</button>
-          {dueBeforeStart(pf) && <div className="small form-error">The due date can't be before the start date.</div>}
+          <button className="btn dark tall" type="submit" disabled={!pf.name.trim() || dueBeforeStart(pf)}>{t('Add')}</button>
+          {dueBeforeStart(pf) && <div className="small form-error">{t("The due date can't be before the start date.")}</div>}
         </form>
       )}
 
@@ -356,26 +361,26 @@ function Projects({ data, update, openProject }: { data: AppData; update: Update
           return (
             <div className="proj" key={p.id}>
               <div className="cell c-name">
-                <span className="cell-k">Project name</span>
-                <button className="proj-name ellipsis" onClick={() => openProject(p.id)} title="Open project">{p.name}</button>
+                <span className="cell-k">{t('Project name')}</span>
+                <button className="proj-name ellipsis" onClick={() => openProject(p.id)} title={t('Open project')}>{p.name}</button>
               </div>
               <div className="cell c-client">
-                <span className="cell-k">Client</span>
+                <span className="cell-k">{t('Client')}</span>
                 <span className="client">
                   <ClientDot client={clientOf(p.clientId)} />
                   <span className="ellipsis">{clientOf(p.clientId)?.name || '—'}</span>
                 </span>
               </div>
               <div className="cell c-start">
-                <span className="cell-k">Start</span>
+                <span className="cell-k">{t('Start')}</span>
                 <span className="cell-v">{fmtDate(p.start)}</span>
               </div>
               <div className="cell c-deadline">
-                <span className="cell-k">Due</span>
-                <span className="cell-v" style={{ color: late ? 'var(--red)' : undefined, fontWeight: late ? 600 : undefined }} title={late ? 'Overdue' : undefined}>{fmtDate(p.deadline)}</span>
+                <span className="cell-k">{t('Due')}</span>
+                <span className="cell-v" style={{ color: late ? 'var(--red)' : undefined, fontWeight: late ? 600 : undefined }} title={late ? t('Overdue') : undefined}>{fmtDate(p.deadline)}</span>
               </div>
               <div className="cell c-progress">
-                <span className="cell-k">Tasks</span>
+                <span className="cell-k">{t('Tasks')}</span>
                 {tasks.length ? (
                   <span className="progress">
                     <span className="progress-bar"><div style={{ width: `${(done / tasks.length) * 100}%` }} /></span>
@@ -386,14 +391,14 @@ function Projects({ data, update, openProject }: { data: AppData; update: Update
                 )}
               </div>
               <div className="cell c-status">
-                <span className="cell-k">Status</span>
-                <button className="pill" style={{ background: meta.bg, color: meta.color }} onClick={() => cycle(p.id)} title="Click to change">{statusLabel(p.status)}</button>
+                <span className="cell-k">{t('Status')}</span>
+                <button className="pill" style={{ background: meta.bg, color: meta.color }} onClick={() => cycle(p.id)} title={t('Click to change')}>{statusLabel(p.status)}</button>
               </div>
               <div className="c-actions">
-                <button className="icon-btn" onClick={() => setEditing(p)} title="Edit" aria-label={`Edit ${p.name}`}>
+                <button className="icon-btn" onClick={() => setEditing(p)} title={t('Edit')} aria-label={t('Edit {name}', { name: p.name })}>
                   <IconPencil />
                 </button>
-                <button className="icon-btn danger" onClick={() => void remove(p)} title="Delete" aria-label={`Delete ${p.name}`}>
+                <button className="icon-btn danger" onClick={() => void remove(p)} title={t('Delete')} aria-label={t('Delete {name}', { name: p.name })}>
                   <span style={{ fontSize: '1.125rem', lineHeight: 1 }}>×</span>
                 </button>
               </div>
@@ -402,7 +407,7 @@ function Projects({ data, update, openProject }: { data: AppData; update: Update
         })}
         {list.length === 0 && (
           <div className="empty">
-            {data.projects.length === 0 ? 'No projects yet. Add your first one with "New project".' : 'No projects match this filter.'}
+            {data.projects.length === 0 ? t('No projects yet. Add your first one with "New project".') : t('No projects match this filter.')}
           </div>
         )}
       </div>}
@@ -436,7 +441,7 @@ export function ProjectModal({ project, data, onClose, update, onCreated, onDele
     const next = { ...f, name: f.name.trim(), budget: budgetValue ?? 0 };
     if (creating) {
       update((d) => ({ ...d, projects: [{ ...next, position: topPosition(d.projects) }, ...d.projects] }));
-      toast(<>Project <b>{next.name}</b> created</>, { tone: 'success' });
+      toast(<>{t('Project created:')} <b>{next.name}</b></>, { tone: 'success' });
       onClose();
       onCreated?.(f.id);
       return;
@@ -447,40 +452,40 @@ export function ProjectModal({ project, data, onClose, update, onCreated, onDele
   };
   const remove = async () => {
     const ok = await confirm({
-      title: 'Delete this project?',
-      message: <>"{project.name}" will be deleted, along with its brief and journal. Its tasks, transactions and tracked time are kept, with no project.</>,
-      confirmLabel: 'Delete',
+      title: t('Delete this project?'),
+      message: t('"{name}" will be deleted, along with its brief and journal. Its tasks, transactions and tracked time are kept, with no project.', { name: project.name }),
+      confirmLabel: t('Delete'),
       danger: true,
     });
     if (!ok) return;
     const { restore } = removeProject(data, project.id);
     update((d) => removeProject(d, project.id).data);
-    toast(<>Project <b>{project.name}</b> deleted</>, { undo: () => update(restore) });
+    toast(<>{t('Project deleted:')} <b>{project.name}</b></>, { undo: () => update(restore) });
     onClose();
     onDeleted?.();
   };
   return (
-    <Modal title={creating ? 'New project' : 'Edit project'} onClose={onClose}>
+    <Modal title={creating ? t('New project') : t('Edit project')} onClose={onClose}>
       <form className="section" onSubmit={(e) => { e.preventDefault(); save(); }}>
         <div className="form-grid">
-          <Field label="Project name"><input className="input" autoFocus={creating} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Website redesign…" /></Field>
-          <Field label="Client"><ClientSelect data={data} update={update} value={f.clientId} onChange={(clientId) => setF({ ...f, clientId })} /></Field>
-          <Field label="Start"><DatePicker value={f.start} onChange={(start) => setF({ ...f, start })} placeholder="No start date" ariaLabel="Start" /></Field>
-          <Field label="Due"><DatePicker value={f.deadline} onChange={(deadline) => setF({ ...f, deadline })} min={f.start || undefined} placeholder="No due date" ariaLabel="Due" /></Field>
-          <Field label="Status">
-            <Select value={f.status} onChange={(status) => setF({ ...f, status })} options={STATUS_OPTIONS} ariaLabel="Status" />
+          <Field label={t('Project name')}><input className="input" autoFocus={creating} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder={t('Website redesign…')} /></Field>
+          <Field label={t('Client')}><ClientSelect data={data} update={update} value={f.clientId} onChange={(clientId) => setF({ ...f, clientId })} /></Field>
+          <Field label={t('Start')}><DatePicker value={f.start} onChange={(start) => setF({ ...f, start })} placeholder={t('No start date')} ariaLabel={t('Start')} /></Field>
+          <Field label={t('Due')}><DatePicker value={f.deadline} onChange={(deadline) => setF({ ...f, deadline })} min={f.start || undefined} placeholder={t('No due date')} ariaLabel={t('Due')} /></Field>
+          <Field label={t('Status')}>
+            <Select value={f.status} onChange={(status) => setF({ ...f, status })} options={statusOptions()} ariaLabel={t('Status')} />
           </Field>
-          <Field label={`Budget excl. tax (${data.profile.currency})`}>
-            <input className="input" inputMode="decimal" value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="Agreed price, optional" />
+          <Field label={t('Budget excl. tax ({currency})', { currency: data.profile.currency })}>
+            <input className="input" inputMode="decimal" value={budget} onChange={(e) => setBudget(e.target.value)} placeholder={t('Agreed price, optional')} />
           </Field>
         </div>
-        {dueBeforeStart(f) && <div className="small form-error">The due date can't be before the start date.</div>}
-        {budgetValue === null && <div className="small form-error">Invalid amount. Examples: 12000 · 12 000 · 12000.50</div>}
+        {dueBeforeStart(f) && <div className="small form-error">{t("The due date can't be before the start date.")}</div>}
+        {budgetValue === null && <div className="small form-error">{t('Invalid amount. Examples: 12000 · 12 000 · 12000.50')}</div>}
         <div className="modal-foot">
-          {creating ? <span /> : <button className="btn sm danger" type="button" onClick={() => void remove()}>Delete project</button>}
+          {creating ? <span /> : <button className="btn sm danger" type="button" onClick={() => void remove()}>{t('Delete project')}</button>}
           <div className="row" style={{ gap: '0.5rem' }}>
-            <button className="btn sm ghost" type="button" onClick={onClose}>Cancel</button>
-            <button className="btn sm" type="submit" disabled={!valid}>{creating ? 'Create project' : 'Save'}</button>
+            <button className="btn sm ghost" type="button" onClick={onClose}>{t('Cancel')}</button>
+            <button className="btn sm" type="submit" disabled={!valid}>{creating ? t('Create project') : t('Save')}</button>
           </div>
         </div>
       </form>
@@ -588,19 +593,19 @@ function Board({ data, update, filter, setFilter, onEdit, sectionRef }: {
   }, [data.tasks]);
 
   // Deleting is instant: the toast offers Undo for a few seconds.
-  const removeTask = (t: Task) => {
-    const { restore } = removeRow(data, 'tasks', t.id);
-    update((d) => removeRow(d, 'tasks', t.id).data);
-    toast(<>Task <b>{t.title}</b> deleted</>, { undo: () => update(restore) });
+  const removeTask = (task: Task) => {
+    const { restore } = removeRow(data, 'tasks', task.id);
+    update((d) => removeRow(d, 'tasks', task.id).data);
+    toast(<>{t('Task deleted:')} <b>{task.title}</b></>, { undo: () => update(restore) });
   };
-  const toggleTimer = (t: Task) => {
-    if (running?.taskId === t.id) {
+  const toggleTimer = (task: Task) => {
+    if (running?.taskId === task.id) {
       const { added } = stopTimers(data);
       update((d) => stopTimers(d).data);
-      toast(added ? <>{fmtDuration(added)} logged on <b>{t.title}</b></> : 'Timer stopped (under a minute, not logged)');
+      toast(added ? <>{t('{d} logged on', { d: fmtDuration(added) })} <b>{task.title}</b></> : t('Timer stopped (under a minute, not logged)'));
     } else {
-      update((d) => startTimer(d, { projectId: t.projectId, taskId: t.id }));
-      toast(<>Timer started on <b>{t.title}</b></>);
+      update((d) => startTimer(d, { projectId: task.projectId, taskId: task.id }));
+      toast(<>{t('Timer started on')} <b>{task.title}</b></>);
     }
   };
 
@@ -654,15 +659,15 @@ function Board({ data, update, filter, setFilter, onEdit, sectionRef }: {
     setDrop(null);
   };
 
-  const clientOptions = [{ value: '', label: 'All clients' }, ...data.clients.map((c) => ({ value: c.id, label: c.name, color: c.color }))];
+  const clientOptions = [{ value: '', label: t('All clients') }, ...data.clients.map((c) => ({ value: c.id, label: c.name, color: c.color }))];
   const projectOptions = [
-    { value: '', label: 'All projects' },
+    { value: '', label: t('All projects') },
     ...data.projects.filter((p) => p.status !== 'Done' || p.id === filter.projectId).map((p) => ({ value: p.id, label: p.name, color: clientOf(p.clientId)?.color })),
   ];
   const priorityOptions = [
-    { value: 'any' as const, label: 'Any priority' },
-    { value: 'high' as const, label: 'High only', color: priorityMeta('high').color },
-    { value: 'medium' as const, label: 'Medium and up', color: priorityMeta('medium').color },
+    { value: 'any' as const, label: t('Any priority') },
+    { value: 'high' as const, label: t('High only'), color: priorityMeta('high').color },
+    { value: 'medium' as const, label: t('Medium and up'), color: priorityMeta('medium').color },
   ];
   const visible = data.tasks.filter((t) => (showArchived || !isArchived(t, now)));
   const shown = visible.filter(matches).length;
@@ -671,10 +676,10 @@ function Board({ data, update, filter, setFilter, onEdit, sectionRef }: {
     <section className="section" ref={sectionRef} style={{ scrollMarginTop: '1rem' }}>
       <div className="head">
         <div className="head-title">
-          <h2>Tasks</h2>
-          <span className="sub">{active ? `${shown} of ${visible.length} shown` : 'Drag cards to reorder them or move them to another column'}</span>
+          <h2>{t('Tasks')}</h2>
+          <span className="sub">{active ? t('{n} of {total} shown', { n: shown, total: visible.length }) : t('Drag cards to reorder them or move them to another column')}</span>
         </div>
-        <button className="btn" onClick={() => onEdit(newTask('todo', filter.projectId))}>+ New task</button>
+        <button className="btn" onClick={() => onEdit(newTask('todo', filter.projectId))}>+ {t('New task')}</button>
       </div>
 
       <div className="board-tools">
@@ -685,20 +690,20 @@ function Board({ data, update, filter, setFilter, onEdit, sectionRef }: {
             value={filter.q}
             onChange={(e) => setFilter({ ...filter, q: e.target.value })}
             onKeyDown={(e) => e.key === 'Escape' && (setFilter({ ...filter, q: '' }), (e.target as HTMLInputElement).blur())}
-            placeholder="Search tasks"
-            aria-label="Search tasks"
+            placeholder={t('Search tasks')}
+            aria-label={t('Search tasks')}
           />
           {filter.q ? (
-            <button className="x" onClick={() => setFilter({ ...filter, q: '' })} aria-label="Clear search">×</button>
+            <button className="x" onClick={() => setFilter({ ...filter, q: '' })} aria-label={t('Clear search')}>×</button>
           ) : (
             <kbd>/</kbd>
           )}
         </label>
-        <div className="tool-sel"><Select value={filter.clientId} onChange={(clientId) => setFilter({ ...filter, clientId })} options={clientOptions} size="sm" ariaLabel="Filter by client" /></div>
-        <div className="tool-sel"><Select value={filter.projectId} onChange={(projectId) => setFilter({ ...filter, projectId })} options={projectOptions} size="sm" ariaLabel="Filter by project" /></div>
-        <div className="tool-sel"><Select value={filter.priority} onChange={(priority) => setFilter({ ...filter, priority })} options={priorityOptions} size="sm" ariaLabel="Filter by priority" /></div>
-        <Seg label="Due" value={filter.due} onChange={(due) => setFilter({ ...filter, due })} options={[['all', 'All'], ['overdue', 'Overdue'], ['today', 'Today'], ['week', '7 days']]} />
-        {active && <button className="btn sm ghost" onClick={() => setFilter(NO_FILTER)}>Clear filters</button>}
+        <div className="tool-sel"><Select value={filter.clientId} onChange={(clientId) => setFilter({ ...filter, clientId })} options={clientOptions} size="sm" ariaLabel={t('Filter by client')} /></div>
+        <div className="tool-sel"><Select value={filter.projectId} onChange={(projectId) => setFilter({ ...filter, projectId })} options={projectOptions} size="sm" ariaLabel={t('Filter by project')} /></div>
+        <div className="tool-sel"><Select value={filter.priority} onChange={(priority) => setFilter({ ...filter, priority })} options={priorityOptions} size="sm" ariaLabel={t('Filter by priority')} /></div>
+        <Seg label={t('Due')} value={filter.due} onChange={(due) => setFilter({ ...filter, due })} options={[['all', t('All')], ['overdue', t('Overdue')], ['today', t('Today')], ['week', t('7 days')]]} />
+        {active && <button className="btn sm ghost" onClick={() => setFilter(NO_FILTER)}>{t('Clear filters')}</button>}
       </div>
 
       <div className="board">
@@ -720,109 +725,109 @@ function Board({ data, update, filter, setFilter, onEdit, sectionRef }: {
               onDrop={(e) => onDrop(e, c.key)}
             >
               <div className="col-head">
-                <div className="col-name"><span className="dot round" style={{ background: c.dot }} />{c.label}</div>
+                <div className="col-name"><span className="dot round" style={{ background: c.dot }} />{t(c.label)}</div>
                 <span className="count">{active && tasks.length !== inCol.length ? `${tasks.length}/${inCol.length}` : tasks.length}</span>
               </div>
-              {tasks.map((t, idx) => {
-                const project = projectOf(t.projectId);
+              {tasks.map((task, idx) => {
+                const project = projectOf(task.projectId);
                 const pn = project?.name ?? '';
-                const client = clientOf(t.clientId) ?? clientOf(project?.clientId ?? '');
-                const open = t.col !== 'done';
-                const late = open && !!t.due && t.due < today;
-                const isToday = open && t.due === today;
-                const pri = priorityMeta(t.priority);
-                const checks = t.checklist.length;
-                const checked = t.checklist.filter((x) => x.done).length;
-                const timing = running?.taskId === t.id;
-                const logged = data.timeEntries.filter((x) => x.taskId === t.id).reduce((a, x) => a + entryMinutes(x, now), 0);
+                const client = clientOf(task.clientId) ?? clientOf(project?.clientId ?? '');
+                const open = task.col !== 'done';
+                const late = open && !!task.due && task.due < today;
+                const isToday = open && task.due === today;
+                const pri = priorityMeta(task.priority);
+                const checks = task.checklist.length;
+                const checked = task.checklist.filter((x) => x.done).length;
+                const timing = running?.taskId === task.id;
+                const logged = data.timeEntries.filter((x) => x.taskId === task.id).reduce((a, x) => a + entryMinutes(x, now), 0);
                 return (
                   <div
-                    key={t.id}
-                    data-id={t.id}
+                    key={task.id}
+                    data-id={task.id}
                     className={
                       'task' +
-                      (dragId === t.id ? ' dragging' : '') +
+                      (dragId === task.id ? ' dragging' : '') +
                       (late ? ' is-late' : isToday ? ' is-today' : '') +
                       (timing ? ' is-running' : '') +
-                      (t.col === 'done' ? ' is-done' : '') +
-                      (drop?.col === c.key && drop.before === t.id && !isNoop(c.key, t.id) ? ' drop-before' : '')
+                      (task.col === 'done' ? ' is-done' : '') +
+                      (drop?.col === c.key && drop.before === task.id && !isNoop(c.key, task.id) ? ' drop-before' : '')
                     }
                     draggable
                     tabIndex={0}
                     role="button"
-                    aria-label={`Edit task ${t.title}. Alt + arrow keys to move it.`}
-                    onDragStart={(e) => { e.dataTransfer.setData('text/plain', t.id); e.dataTransfer.effectAllowed = 'move'; setDragId(t.id); }}
+                    aria-label={t('Edit task {title}. Alt + arrow keys to move it.', { title: task.title })}
+                    onDragStart={(e) => { e.dataTransfer.setData('text/plain', task.id); e.dataTransfer.effectAllowed = 'move'; setDragId(task.id); }}
                     onDragEnd={() => { setDragId(null); setDrop(null); }}
-                    onClick={() => onEdit(t)}
+                    onClick={() => onEdit(task)}
                     onKeyDown={(e) => {
                       if (e.target !== e.currentTarget) return;
                       if (e.altKey && e.key.startsWith('Arrow')) {
                         e.preventDefault();
-                        step(t, e.key.slice(5).toLowerCase() as 'up' | 'down' | 'left' | 'right');
+                        step(task, e.key.slice(5).toLowerCase() as 'up' | 'down' | 'left' | 'right');
                         return;
                       }
-                      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onEdit(t); }
+                      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onEdit(task); }
                     }}
                   >
-                    {(client || t.priority !== 'none') && (
+                    {(client || task.priority !== 'none') && (
                       <div className="task-labels">
                         {client ? <ClientChip client={client} size="sm" /> : <span />}
-                        {t.priority !== 'none' && (
-                          <span className={'prio prio-' + t.priority} style={{ color: pri.color }} title={`${pri.label} priority`}>
-                            <IconFlag size={11} />{t.priority === 'high' ? 'High' : ''}
+                        {task.priority !== 'none' && (
+                          <span className={'prio prio-' + task.priority} style={{ color: pri.color }} title={t('{p} priority', { p: t(pri.label) })}>
+                            <IconFlag size={11} />{task.priority === 'high' ? t('High') : ''}
                           </span>
                         )}
                       </div>
                     )}
                     <div className="task-top">
-                      <span className="task-title">{t.title}</span>
+                      <span className="task-title">{task.title}</span>
                       <span className="task-btns">
                         {open && (
                           <button
                             className={'task-play' + (timing ? ' on' : '')}
-                            aria-label={timing ? 'Stop timer' : 'Start timer'}
-                            title={timing ? 'Stop timer' : 'Start timer'}
-                            onClick={(e) => { e.stopPropagation(); toggleTimer(t); }}
+                            aria-label={timing ? t('Stop timer') : t('Start timer')}
+                            title={timing ? t('Stop timer') : t('Start timer')}
+                            onClick={(e) => { e.stopPropagation(); toggleTimer(task); }}
                           >
                             {timing ? <IconStop size={10} /> : <IconPlay size={10} />}
                           </button>
                         )}
-                        <button className="x" aria-label="Delete task" onClick={(e) => { e.stopPropagation(); removeTask(t); }}>×</button>
+                        <button className="x" aria-label={t('Delete task')} onClick={(e) => { e.stopPropagation(); removeTask(task); }}>×</button>
                       </span>
                     </div>
                     <div className="task-foot">
-                      {(pn || t.due || t.note || checks > 0 || logged > 0 || timing) && (
+                      {(pn || task.due || task.note || checks > 0 || logged > 0 || timing) && (
                         <div className="task-meta">
                           {pn && <span className="tag">{pn}</span>}
-                          {t.due && <span className={'due' + (late ? ' late' : isToday ? ' today' : '')}>{t.col === 'done' ? fmtDate(t.due, true) : dueLabel(t.due, today)}</span>}
+                          {task.due && <span className={'due' + (late ? ' late' : isToday ? ' today' : '')}>{task.col === 'done' ? fmtDate(task.due, true) : dueLabel(task.due, today)}</span>}
                           {checks > 0 && (
-                            <span className={'meta-chip' + (checked === checks ? ' complete' : '')} title="Checklist">
+                            <span className={'meta-chip' + (checked === checks ? ' complete' : '')} title={t('Checklist')}>
                               <IconChecks size={12} />{checked}/{checks}
                             </span>
                           )}
                           {timing && running ? (
                             <span className="meta-chip live"><span className="live-dot" />{fmtClock(entryMinutes(running, now) * 60_000)}</span>
                           ) : logged > 0 ? (
-                            <span className="meta-chip" title="Time logged"><IconClock size={12} />{fmtDuration(logged)}</span>
+                            <span className="meta-chip" title={t('Time logged')}><IconClock size={12} />{fmtDuration(logged)}</span>
                           ) : null}
-                          {t.note && <span className="note-flag" title={t.note}>≡</span>}
+                          {task.note && <span className="note-flag" title={task.note}>≡</span>}
                         </div>
                       )}
                       {/* Touch screens only (no drag and drop there): bottom right, away from the delete button. */}
                       <span className="task-order">
-                        <button className="order-btn" aria-label="Move up" disabled={idx === 0} onClick={(e) => { e.stopPropagation(); tapStep(e, t, 'up'); }}>↑</button>
-                        <button className="order-btn" aria-label="Move down" disabled={idx === tasks.length - 1} onClick={(e) => { e.stopPropagation(); tapStep(e, t, 'down'); }}>↓</button>
+                        <button className="order-btn" aria-label={t('Move up')} disabled={idx === 0} onClick={(e) => { e.stopPropagation(); tapStep(e, task, 'up'); }}>↑</button>
+                        <button className="order-btn" aria-label={t('Move down')} disabled={idx === tasks.length - 1} onClick={(e) => { e.stopPropagation(); tapStep(e, task, 'down'); }}>↓</button>
                       </span>
                     </div>
                     {checks > 0 && <span className="task-progress"><span style={{ width: `${(checked / checks) * 100}%` }} /></span>}
                   </div>
                 );
               })}
-              {tasks.length === 0 && active && inCol.length > 0 && <div className="col-empty">No match here</div>}
+              {tasks.length === 0 && active && inCol.length > 0 && <div className="col-empty">{t('No match here')}</div>}
               {drop?.col === c.key && drop.before === null && !isNoop(c.key, null) && <div className="drop-end" />}
               {archived > 0 && (
                 <button className="archived-link" onClick={() => setShowArchived(!showArchived)} aria-pressed={showArchived}>
-                  {showArchived ? `Hide ${archived} archived` : `${archived} archived (done over ${ARCHIVE_AFTER_DAYS} days ago) · show`}
+                  {showArchived ? t('Hide {n} archived', { n: archived }) : t('{n} archived (done over {days} days ago) · show', { n: archived, days: ARCHIVE_AFTER_DAYS })}
                 </button>
               )}
               {adding === c.key ? (
@@ -833,16 +838,16 @@ function Board({ data, update, filter, setFilter, onEdit, sectionRef }: {
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     onKeyDown={(e) => e.key === 'Escape' && setAdding(null)}
-                    placeholder="Task title, then Enter"
+                    placeholder={t('Task title, then Enter')}
                   />
                   <div className="row" style={{ gap: '0.5rem' }}>
-                    <button className="btn sm" type="submit">Add</button>
-                    <button className="btn sm ghost" type="button" onClick={() => setAdding(null)}>Close</button>
-                    <button className="btn sm ghost" type="button" style={{ marginLeft: 'auto' }} onClick={() => { setAdding(null); onEdit({ ...newTask(c.key, filter.projectId), title }); }}>More…</button>
+                    <button className="btn sm" type="submit">{t('Add')}</button>
+                    <button className="btn sm ghost" type="button" onClick={() => setAdding(null)}>{t('Close')}</button>
+                    <button className="btn sm ghost" type="button" style={{ marginLeft: 'auto' }} onClick={() => { setAdding(null); onEdit({ ...newTask(c.key, filter.projectId), title }); }}>{t('More…')}</button>
                   </div>
                 </form>
               ) : (
-                <button className="add-link" onClick={() => { setAdding(c.key); setTitle(''); }}>+ Add a task</button>
+                <button className="add-link" onClick={() => { setAdding(c.key); setTitle(''); }}>+ {t('Add a task')}</button>
               )}
             </div>
           );

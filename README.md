@@ -10,6 +10,8 @@ Your business cockpit for freelancers and small studios: projects, a daily task 
 - **Time tracking**: start and stop a timer on a task or a project (it keeps running if you close the tab), or log time by hand ("1h30", "45m").
 - **Finances**: revenue, direct costs, overheads and margin for one month, 3 months, 12 months or all time, unpaid invoices with their due dates, and profitability per project. Subscriptions, retainers and contractors are entered once and counted every month automatically.
 - **Fast to use**: Ctrl + K (⌘ K on a Mac) searches everything and runs actions; N creates a task, P a project, / searches the board, G then O / P / F / D switches pages. Deletes show a notification with Undo.
+- **English and French**: switch with EN / FR at the top right (remembered on each device).
+- **Clients, taxes and wealth**: per-client analytics with contacts, micro-entreprise taxes (gross / net), and a Wealth tab for Trade Republic, Moroccan stocks and OPCVM, and real estate.
 - **Light and dark themes**: a clean black and white look. Follows your device by default; switch Light / Dark / System at the bottom of the sidebar (the sun / moon button on phones).
 - **Data & profile**: your name, photo and currency, your clients and their colours, transactions, recurring items, and a backup file you can download.
 

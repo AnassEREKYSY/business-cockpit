@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { initials } from '../lib/format';
 import type { ThemePref } from '../lib/theme';
+import { t } from '../lib/i18n';
 
 export function Seg<T extends string>({ options, value, onChange, label }: {
   options: [T, string][];
@@ -52,7 +53,7 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
       <div className="modal" role="dialog" aria-modal="true" aria-label={title}>
         <div className="modal-head">
           <div className="card-title">{title}</div>
-          <button className="x" onClick={onClose} aria-label="Close">×</button>
+          <button className="x" onClick={onClose} aria-label={t('Close')}>×</button>
         </div>
         {children}
       </div>
@@ -63,12 +64,18 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
 /** Brand mark, drawn inline so it follows the theme (ink square, background-coloured gauge). */
 export const BrandMark = ({ size = 32 }: { size?: number }) => (
   <svg viewBox="0 0 1250 1408" className="brand-logo" style={{ height: `${size / 16}rem`, width: `${(size * 1250) / 1408 / 16}rem` }} aria-hidden="true">
-    <rect x="0" y="79" width="1250" height="1250" rx="300" fill="var(--ink)" />
-    <g fill="none" stroke="var(--bg)" strokeLinecap="round">
+    <defs>
+      <linearGradient id="brand-grad" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stopColor="#6366f1" />
+        <stop offset="1" stopColor="#a855f7" />
+      </linearGradient>
+    </defs>
+    <rect x="0" y="79" width="1250" height="1250" rx="320" fill="url(#brand-grad)" />
+    <g fill="none" stroke="#fff" strokeLinecap="round">
       <path d="M370 959 A360 360 0 1 1 880 959" strokeWidth="110" />
       <path className="brand-needle" d="M625 704 L816 513" strokeWidth="90" />
     </g>
-    <circle cx="625" cy="704" r="85" fill="var(--bg)" />
+    <circle cx="625" cy="704" r="85" fill="#fff" />
   </svg>
 );
 
@@ -154,9 +161,9 @@ const center = (e: React.MouseEvent) => {
 export function ThemeSwitch({ pref, onChange }: { pref: ThemePref; onChange: (p: ThemePref, origin: { x: number; y: number }) => void }) {
   const i = THEMES.findIndex(([v]) => v === pref);
   return (
-    <div className="theme-switch" role="radiogroup" aria-label="Theme" style={{ '--i': i } as React.CSSProperties}>
+    <div className="theme-switch" role="radiogroup" aria-label={t('Theme')} style={{ '--i': i } as React.CSSProperties}>
       {THEMES.map(([v, label, Icon]) => (
-        <button key={v} role="radio" aria-checked={pref === v} title={label} aria-label={label} onClick={(e) => onChange(v, center(e))}>
+        <button key={v} role="radio" aria-checked={pref === v} title={t(label)} aria-label={t(label)} onClick={(e) => onChange(v, center(e))}>
           <Icon />
         </button>
       ))}
@@ -167,7 +174,7 @@ export function ThemeSwitch({ pref, onChange }: { pref: ThemePref; onChange: (p:
 /** Compact version for phones: one button that toggles light and dark. */
 export function ThemeMini({ dark, onToggle }: { dark: boolean; onToggle: (origin: { x: number; y: number }) => void }) {
   return (
-    <button className="theme-mini" onClick={(e) => onToggle(center(e))} aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}>
+    <button className="theme-mini" onClick={(e) => onToggle(center(e))} aria-label={dark ? t('Switch to light theme') : t('Switch to dark theme')}>
       {dark ? <IconSun /> : <IconMoon />}
     </button>
   );
@@ -209,5 +216,11 @@ export const IconWealth = () => (
   <Svg>
     <path d="M12 3v9l7.8 4.5" />
     <circle cx="12" cy="12" r="9" />
+  </Svg>
+);
+
+export const IconTrash = ({ size = 14 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" />
   </Svg>
 );

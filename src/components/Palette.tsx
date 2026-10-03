@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { t } from '../lib/i18n';
 
 export type Command = {
   id: string;
@@ -71,15 +72,15 @@ export function Palette({ commands, onClose }: { commands: Command[]; onClose: (
 
   return (
     <div className="overlay palette-overlay" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+      <div className="palette" role="dialog" aria-modal="true" aria-label={t('Command palette')}>
         <div className="palette-search">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
           <input
             autoFocus
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search projects, tasks, actions…"
-            aria-label="Search"
+            placeholder={t('Search projects, tasks, actions…')}
+            aria-label={t('Search')}
             role="combobox"
             aria-expanded="true"
             aria-controls="palette-list"
@@ -126,14 +127,14 @@ export function Palette({ commands, onClose }: { commands: Command[]; onClose: (
               ))}
             </div>
           ))}
-          {shown.length === 0 && <div className="palette-empty">Nothing matches "{q}"</div>}
+          {shown.length === 0 && <div className="palette-empty">{t('Nothing matches "{q}"', { q })}</div>}
         </div>
         <div className="palette-foot">
-          <span><kbd>↑</kbd><kbd>↓</kbd> move</span>
-          <span><kbd>↵</kbd> open</span>
-          <span><kbd>N</kbd> new task</span>
-          <span><kbd>P</kbd> new project</span>
-          <span><kbd>/</kbd> search tasks</span>
+          <span><kbd>↑</kbd><kbd>↓</kbd> {t('move')}</span>
+          <span><kbd>↵</kbd> {t('open')}</span>
+          <span><kbd>N</kbd> {t('new task')}</span>
+          <span><kbd>P</kbd> {t('new project')}</span>
+          <span><kbd>/</kbd> {t('search tasks')}</span>
         </div>
       </div>
     </div>

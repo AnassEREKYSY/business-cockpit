@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from 'react';
 import { Modal } from './ui';
+import { t } from '../lib/i18n';
 
 type Ask = {
   title: string;
@@ -40,10 +41,10 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
           {ask.message && <div className="sub" style={{ lineHeight: 1.6, color: 'var(--ink-2)' }}>{ask.message}</div>}
           <div className="row" style={{ justifyContent: 'flex-end', gap: '0.5rem' }}>
             {ask.cancelLabel !== null && (
-              <button className="btn sm ghost" onClick={() => done(false)}>{ask.cancelLabel ?? 'Cancel'}</button>
+              <button className="btn sm ghost" onClick={() => done(false)}>{ask.cancelLabel ?? t('Cancel')}</button>
             )}
             <button className={'btn sm' + (ask.danger ? ' danger-solid' : '')} autoFocus onClick={() => done(true)}>
-              {ask.confirmLabel ?? 'OK'}
+              {ask.confirmLabel ?? t('OK')}
             </button>
           </div>
         </Modal>

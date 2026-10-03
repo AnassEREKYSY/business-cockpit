@@ -6,14 +6,15 @@ import { useToast } from './components/Toast';
 import { Avatar, BrandMark, IconClients, IconData, IconFinance, IconOverview, IconPlus, IconProjects, IconSearch, IconStop, IconWealth, ThemeMini, ThemeSwitch } from './components/ui';
 import { SCHEMA_OUTDATED } from './lib/remote';
 import { unpaidInvoices } from './lib/stats';
-import { resolved, useTheme } from './lib/theme';
+import { resolved, useTheme, type ThemePref } from './lib/theme';
+import { locale, setLang, t, useLang } from './lib/i18n';
 import { entryMinutes, fmtClock, fmtDuration, runningEntry, stopTimers, sumMinutes, useNow, weekStart } from './lib/time';
 import { isArchived } from './lib/store';
 import type { Entry, Project, Task } from './types';
 import { allTxns, totals } from './lib/finance';
 import { monthKey, pct } from './lib/format';
 import { useConfirm } from './components/Confirm';
-import { LOCALE } from './lib/constants';
+import { statusLabel } from './lib/constants';
 import { useAppData, type Repository, type SyncStatus } from './lib/store';
 import DataPage from './pages/DataPage';
 import FinancesPage from './pages/FinancesPage';
@@ -45,7 +46,7 @@ const routeFromHash = (): Route => {
   return { page: PAGES.find((p) => p.hash && location.hash === '#/' + p.hash)?.key ?? 'overview', projectId: '' };
 };
 
-const SYNC_LABEL: Record<SyncStatus, string> = {
+const SYNC_TEXT: Record<SyncStatus, string> = {
   loading: 'Loading…',
   saved: 'Saved',
   saving: 'Saving…',
@@ -59,6 +60,7 @@ export default function App({ repo, account }: { repo: Repository; account?: Acc
   const confirm = useConfirm();
   const toast = useToast();
   const { pref, setTheme } = useTheme();
+  const lang = useLang();
   const [palette, setPalette] = useState(false);
   // Forms opened from the palette or a keyboard shortcut, wherever you are.
   const [modal, setModal] = useState<{ task?: Task; project?: Project; entry?: Entry } | null>(null);
@@ -69,9 +71,9 @@ export default function App({ repo, account }: { repo: Repository; account?: Acc
         if (
           hasUnsaved() &&
           !(await confirm({
-            title: 'Sign out?',
-            message: "Some changes aren't saved yet. They will be lost.",
-            confirmLabel: 'Sign out',
+            title: t('Sign out?'),
+            message: t("Some changes aren't saved yet. They will be lost."),
+            confirmLabel: t('Sign out'),
             danger: true,
           }))
         )
@@ -106,7 +108,7 @@ export default function App({ repo, account }: { repo: Repository; account?: Acc
     const { added, stopped } = stopTimers(data);
     update((d) => stopTimers(d).data);
     const what = data.tasks.find((t) => t.id === stopped?.taskId)?.title ?? data.projects.find((p) => p.id === stopped?.projectId)?.name;
-    toast(added ? <>{fmtDuration(added)} logged{what ? <> on <b>{what}</b></> : null}</> : 'Timer stopped (under a minute, not logged)');
+    toast(added ? (what ? <>{t('{d} logged on', { d: fmtDuration(added) })} <b>{what}</b></> : t('{d} logged', { d: fmtDuration(added) })) : t('Timer stopped (under a minute, not logged)'));
   };
 
   // Keyboard: Ctrl/⌘ + K anywhere; single keys only outside text fields and dialogs.
@@ -156,15 +158,13 @@ export default function App({ repo, account }: { repo: Repository; account?: Acc
     return (
       <div className="login">
         <div className="login-card section" style={{ gap: '0.75rem' }}>
-          <h1 style={{ fontSize: '1.25rem' }}>One database update to run</h1>
+          <h1 style={{ fontSize: '1.25rem' }}>{t('One database update to run')}</h1>
           <p className="sub" style={{ margin: 0, lineHeight: 1.6 }}>
-            This version of Cockpit adds new features, and your database needs the matching tables. In Supabase, open
-            <b> SQL Editor → New query</b>, paste the newest file(s) of <code>supabase/migrations/</code> from your repository that you haven't run yet, click
-            <b> Run</b>, then try again. Your data is safe and unchanged.
+            {t('This version of Cockpit adds new features, and your database needs the matching tables. In Supabase, open SQL Editor → New query, paste the newest file(s) of supabase/migrations/ from your repository that you haven’t run yet, click Run, then try again. Your data is safe and unchanged.')}
           </p>
           <div className="row" style={{ gap: '0.5rem' }}>
-            <button className="btn" onClick={retryLoad}>Try again</button>
-            {session && <button className="btn ghost" onClick={session.signOut}>Sign out</button>}
+            <button className="btn" onClick={retryLoad}>{t('Try again')}</button>
+            {session && <button className="btn ghost" onClick={session.signOut}>{t('Sign out')}</button>}
           </div>
         </div>
       </div>
@@ -174,11 +174,11 @@ export default function App({ repo, account }: { repo: Repository; account?: Acc
     return (
       <div className="login">
         <div className="login-card section" style={{ gap: '0.75rem' }}>
-          <h1 style={{ fontSize: '1.25rem' }}>Couldn't load your data</h1>
-          <p className="sub" style={{ margin: 0, lineHeight: 1.6 }}>Check your internet connection, then try again. Nothing was changed.</p>
+          <h1 style={{ fontSize: '1.25rem' }}>{t("Couldn't load your data")}</h1>
+          <p className="sub" style={{ margin: 0, lineHeight: 1.6 }}>{t('Check your internet connection, then try again. Nothing was changed.')}</p>
           <div className="row" style={{ gap: '0.5rem' }}>
-            <button className="btn" onClick={retryLoad}>Try again</button>
-            {session && <button className="btn ghost" onClick={session.signOut}>Sign out</button>}
+            <button className="btn" onClick={retryLoad}>{t('Try again')}</button>
+            {session && <button className="btn ghost" onClick={session.signOut}>{t('Sign out')}</button>}
           </div>
         </div>
       </div>
@@ -188,139 +188,137 @@ export default function App({ repo, account }: { repo: Repository; account?: Acc
   const openedProject = page === 'projects' && route.projectId ? data.projects.find((p) => p.id === route.projectId) : undefined;
   const P = data.profile;
   const current = PAGES.find((p) => p.key === page)!;
-  const today = new Date().toLocaleDateString(LOCALE, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const today = new Date().toLocaleDateString(locale(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
   const weekMin = sumMinutes(data.timeEntries.filter((x) => x.date >= weekStart()), now);
   const runningLabel = running
-    ? data.tasks.find((t) => t.id === running.taskId)?.title ?? data.projects.find((p) => p.id === running.projectId)?.name ?? 'Timer'
+    ? data.tasks.find((t) => t.id === running.taskId)?.title ?? data.projects.find((p) => p.id === running.projectId)?.name ?? t('Timer')
     : '';
   const clientColor = (id: string) => data.clients.find((c) => c.id === id)?.color;
   const dark = resolved(pref) === 'dark';
   const commands: Command[] = [
-    { id: 'new-task', group: 'Actions', label: 'New task', hint: 'N', icon: <IconPlus />, keywords: 'add create todo', run: () => setModal({ task: newTask() }) },
-    { id: 'new-project', group: 'Actions', label: 'New project', hint: 'P', icon: <IconPlus />, keywords: 'add create', run: () => setModal({ project: newProject() }) },
-    { id: 'new-entry', group: 'Actions', label: 'New transaction', icon: <IconPlus />, keywords: 'add invoice expense revenue cost money', run: () => setModal({ entry: newEntry() }) },
+    { id: 'new-task', group: t('Actions'), label: t('New task'), hint: 'N', icon: <IconPlus />, keywords: 'add create todo', run: () => setModal({ task: newTask() }) },
+    { id: 'new-project', group: t('Actions'), label: t('New project'), hint: 'P', icon: <IconPlus />, keywords: 'add create', run: () => setModal({ project: newProject() }) },
+    { id: 'new-entry', group: t('Actions'), label: t('New transaction'), icon: <IconPlus />, keywords: 'add invoice expense revenue cost money', run: () => setModal({ entry: newEntry() }) },
     ...(running
-      ? [{ id: 'stop-timer', group: 'Actions', label: `Stop timer · ${runningLabel}`, hint: fmtClock(entryMinutes(running, now) * 60_000), icon: <IconStop size={12} />, keywords: 'time tracking', run: stopTimer }]
+      ? [{ id: 'stop-timer', group: t('Actions'), label: t('Stop timer · {what}', { what: runningLabel }), hint: fmtClock(entryMinutes(running, now) * 60_000), icon: <IconStop size={12} />, keywords: 'time tracking', run: stopTimer }]
       : []),
-    { id: 'search-tasks', group: 'Actions', label: 'Search tasks on the board', hint: '/', icon: <IconSearch size={14} />, keywords: 'filter find', run: searchTasks },
-    { id: 'theme', group: 'Actions', label: dark ? 'Switch to light theme' : 'Switch to dark theme', icon: <span className="palette-theme" />, keywords: 'theme dark light mode black white', run: () => setTheme(dark ? 'light' : 'dark') },
-    ...PAGES.map(({ key, label, Icon }) => ({ id: 'go-' + key, group: 'Go to', label, hint: 'G ' + { overview: 'O', projects: 'P', clients: 'C', fin: 'F', wealth: 'W', data: 'D' }[key], icon: <Icon />, run: () => go(key) })),
+    { id: 'search-tasks', group: t('Actions'), label: t('Search tasks on the board'), hint: '/', icon: <IconSearch size={14} />, keywords: 'filter find', run: searchTasks },
+    { id: 'theme', group: t('Actions'), label: dark ? t('Switch to light theme') : t('Switch to dark theme'), icon: <span className="palette-theme" />, keywords: 'theme dark light mode black white', run: () => setTheme(dark ? 'light' : 'dark') },
+    ...PAGES.map(({ key, label, Icon }) => ({ id: 'go-' + key, group: t('Go to'), label: t(label), hint: 'G ' + { overview: 'O', projects: 'P', clients: 'C', fin: 'F', wealth: 'W', data: 'D' }[key], icon: <Icon />, run: () => go(key) })),
     ...data.projects
       .filter((p) => p.status !== 'Done')
       .slice(0, 5)
-      .map((p) => ({ id: 'rp-' + p.id, group: 'Projects', label: p.name, hint: data.clients.find((c) => c.id === p.clientId)?.name, color: clientColor(p.clientId), when: 'empty' as const, run: () => openProject(p.id) })),
+      .map((p) => ({ id: 'rp-' + p.id, group: t('Projects'), label: p.name, hint: data.clients.find((c) => c.id === p.clientId)?.name, color: clientColor(p.clientId), when: 'empty' as const, run: () => openProject(p.id) })),
     ...data.projects.map((p) => ({
-      id: 'p-' + p.id, group: 'Projects', label: p.name, hint: data.clients.find((c) => c.id === p.clientId)?.name ?? p.status,
+      id: 'p-' + p.id, group: t('Projects'), label: p.name, hint: data.clients.find((c) => c.id === p.clientId)?.name ?? statusLabel(p.status),
       keywords: p.status, color: clientColor(p.clientId), when: 'query' as const, run: () => openProject(p.id),
     })),
     ...data.tasks
       .filter((t) => !isArchived(t))
-      .map((t) => {
-        const project = data.projects.find((p) => p.id === t.projectId);
+      .map((task) => {
+        const project = data.projects.find((p) => p.id === task.projectId);
         return {
-          id: 't-' + t.id, group: 'Tasks', label: t.title, hint: project?.name ?? { todo: 'To do', ongoing: 'In progress', blocked: 'Blocked', done: 'Done' }[t.col],
-          keywords: `${t.note} ${t.checklist.map((c) => c.text).join(' ')}`, color: clientColor(t.clientId) ?? clientColor(project?.clientId ?? ''),
-          when: 'query' as const, run: () => setModal({ task: t }),
+          id: 't-' + task.id, group: t('Tasks'), label: task.title, hint: project?.name ?? t({ todo: 'To do', ongoing: 'In progress', blocked: 'Blocked', done: 'Done' }[task.col]),
+          keywords: `${task.note} ${task.checklist.map((c) => c.text).join(' ')}`, color: clientColor(task.clientId) ?? clientColor(project?.clientId ?? ''),
+          when: 'query' as const, run: () => setModal({ task }),
         };
       }),
-    ...data.clients.map((c) => ({ id: 'c-' + c.id, group: 'Clients', label: c.name, hint: 'Client', color: c.color, when: 'query' as const, run: () => go('data') })),
+    ...data.clients.map((c) => ({ id: 'c-' + c.id, group: t('Clients'), label: c.name, hint: t('Client'), color: c.color, when: 'query' as const, run: () => go('data') })),
   ];
 
   const nav = PAGES.map(({ key, label, Icon }) => (
-    <button key={key} className={'nav-btn' + (page === key ? ' on' : '')} onClick={() => setPage(key)} aria-current={page === key ? 'page' : undefined}>
+    <button key={key} className={'nav-btn' + (page === key ? ' on' : '')} onClick={() => setPage(key)} aria-current={page === key ? 'page' : undefined} title={t(label)}>
       <Icon />
-      {label}
+      <span className="nav-label">{t(label)}</span>
     </button>
   ));
+  const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform);
 
   return (
     <div className="shell">
-      <aside className="side">
-        <div className="brand">
-          <BrandMark size={32} />
-          <div className="brand-name">Cockpit</div>
-        </div>
-        <button className="search-btn" onClick={() => setPalette(true)}>
-          <IconSearch size={14} />
-          <span>Search…</span>
-          <kbd>{navigator.platform.toLowerCase().includes('mac') ? '⌘' : 'Ctrl'} K</kbd>
-        </button>
-        <nav className="nav">
-          <div className="eyebrow">Menu</div>
-          {nav}
-        </nav>
-        <div className="glance">
-          <div className="eyebrow">At a glance</div>
-          <div className="glance-row"><span>Projects in progress</span><b>{glance.active}</b></div>
-          <div className="glance-row"><span>Blocked tasks</span><b className={glance.blocked ? 'bad' : ''}>{glance.blocked}</b></div>
-          <div className="glance-row"><span>This month's margin</span><b>{glance.hasRevenue ? pct(glance.netRate) : '—'}</b></div>
-          <div className="glance-row"><span>To collect</span><b>{glance.toCollect ? money(glance.toCollect, P.currency) : '—'}</b></div>
-          <div className="glance-row"><span>Tracked this week</span><b>{fmtDuration(weekMin)}</b></div>
-        </div>
-        <div className="glance" style={{ marginTop: 'auto' }}>
-          <div className="eyebrow">Theme</div>
-          <ThemeSwitch pref={pref} onChange={setTheme} />
-        </div>
-        <button className="me" style={{ marginTop: 0 }} onClick={() => setPage('data')} title="Edit profile">
-          <Avatar name={P.name} photo={P.avatar} />
-          <div style={{ minWidth: 0 }}>
-            <div className="me-name ellipsis">{P.name || 'Your name'}</div>
-            <div className="me-mail ellipsis">{P.email || P.company}</div>
-          </div>
-        </button>
-      </aside>
+      <header className="topbar">
+        <div className="topbar-inner">
+          <button className="brand" onClick={() => setPage('overview')} aria-label="Cockpit">
+            <BrandMark size={30} />
+            <span className="brand-name">Cockpit</span>
+          </button>
 
-      <main className="main">
-        <div className="crumbs">
-          <div className="row" style={{ gap: '0.5rem' }}>
-            <span className="mobile-brand"><BrandMark size={24} /></span>
-            <span>{P.company || 'My business'}</span>
-            <span className="sep">/</span>
-            {openedProject ? (
-              <>
-                <button className="crumb-link" onClick={() => setPage('projects')}>Projects</button>
-                <span className="sep">/</span>
-                <span className="here ellipsis" style={{ maxWidth: '16rem' }}>{openedProject.name}</span>
-              </>
-            ) : (
-              <span className="here">{current.label}</span>
-            )}
-          </div>
-          <div className="row" style={{ gap: '0.75rem' }}>
+          <nav className="topnav" aria-label={t('Menu')}>{nav}</nav>
+
+          <div className="top-actions">
             {running && (
               <span className="timer-pill">
-                <button className="timer-pill-main" onClick={() => running.projectId && openProject(running.projectId)} title="Open the project">
+                <button className="timer-pill-main" onClick={() => running.projectId && openProject(running.projectId)} title={t('Open the project')}>
                   <span className="live-dot" />
                   <b>{fmtClock(entryMinutes(running, now) * 60_000)}</b>
                   <span className="ellipsis">{runningLabel}</span>
                 </button>
-                <button className="timer-pill-stop" onClick={stopTimer} aria-label="Stop timer" title="Stop timer"><IconStop size={10} /></button>
+                <button className="timer-pill-stop" onClick={stopTimer} aria-label={t('Stop timer')} title={t('Stop timer')}><IconStop size={10} /></button>
               </span>
             )}
+            <button className="search-btn" onClick={() => setPalette(true)} aria-label={t('Search')}>
+              <IconSearch size={15} />
+              <span className="search-label">{t('Search…')}</span>
+              <kbd>{isMac ? '⌘' : 'Ctrl'} K</kbd>
+            </button>
+            <LangSwitch />
+            <ThemeMini dark={resolved(pref) === 'dark'} onToggle={(o) => setTheme(resolved(pref) === 'dark' ? 'light' : 'dark', o)} />
+            <UserMenu
+              name={P.name}
+              email={account?.email || P.email || P.company}
+              photo={P.avatar}
+              status={account ? t(SYNC_TEXT[status]) : ''}
+              statusClass={'sync-' + status}
+              pref={pref}
+              setTheme={setTheme}
+              glance={glance}
+              currency={P.currency}
+              weekMin={weekMin}
+              onProfile={() => setPage('data')}
+              onSignOut={session?.signOut}
+            />
+          </div>
+        </div>
+      </header>
+
+      <main className="main">
+        <div className="crumbs">
+          <div className="row" style={{ gap: '0.5rem' }}>
+            <span>{P.company || t('My business')}</span>
+            <span className="sep">/</span>
+            {openedProject ? (
+              <>
+                <button className="crumb-link" onClick={() => setPage('projects')}>{t('Projects')}</button>
+                <span className="sep">/</span>
+                <span className="here ellipsis" style={{ maxWidth: '16rem' }}>{openedProject.name}</span>
+              </>
+            ) : (
+              <span className="here">{t(current.label)}</span>
+            )}
+          </div>
+          <div className="row" style={{ gap: '0.75rem' }}>
             {account && (
               <span className={'sync sync-' + status} role="status" title={account.email}>
                 <span className="sync-dot" />
-                {SYNC_LABEL[status]}
+                {t(SYNC_TEXT[status])}
               </span>
             )}
             <span className="today">{today}</span>
-            <button className="theme-mini" onClick={() => setPalette(true)} aria-label="Search"><IconSearch size={15} /></button>
-            <ThemeMini dark={resolved(pref) === 'dark'} onToggle={(o) => setTheme(resolved(pref) === 'dark' ? 'light' : 'dark', o)} />
           </div>
         </div>
 
         {status === 'rejected' && (
           <div className="banner" role="alert">
             <span>
-              <b>The database rejected your last change.</b> Reload to start again from what is saved.
+              <b>{t('The database rejected your last change.')}</b> {t('Reload to start again from what is saved.')}
               {rejection && <span className="small"> ({rejection})</span>}
             </span>
-            <button className="btn sm" onClick={retryLoad}>Reload</button>
+            <button className="btn sm" onClick={retryLoad}>{t('Reload')}</button>
           </div>
         )}
 
-        <div className="page" key={page + route.projectId}>
+        <div className="page" key={page + route.projectId + lang}>
         {page === 'overview' && <OverviewPage data={data} update={update} openProject={openProject} goFinances={() => setPage('fin')} />}
         {page === 'projects' && (
           <ProjectsPage data={data} update={update} projectId={route.projectId} openProject={openProject} back={() => setPage('projects')} />
@@ -341,12 +339,90 @@ export default function App({ repo, account }: { repo: Repository; account?: Acc
   );
 }
 
+/** EN / FR switch. */
+function LangSwitch() {
+  const lang = useLang();
+  return (
+    <div className="lang-switch" role="radiogroup" aria-label={t('Language')}>
+      {(['en', 'fr'] as const).map((l) => (
+        <button key={l} role="radio" aria-checked={lang === l} className={lang === l ? 'on' : ''} onClick={() => setLang(l)}>
+          {l.toUpperCase()}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Avatar button with a small menu: profile, quick numbers, theme, sign out. */
+function UserMenu({ name, email, photo, status, statusClass, pref, setTheme, glance, currency, weekMin, onProfile, onSignOut }: {
+  name: string;
+  email: string;
+  photo: string;
+  status: string;
+  statusClass: string;
+  pref: ThemePref;
+  setTheme: (p: ThemePref, o?: { x: number; y: number }) => void;
+  glance: { active: number; blocked: number; netRate: number; hasRevenue: boolean; toCollect: number };
+  currency: string;
+  weekMin: number;
+  onProfile: () => void;
+  onSignOut?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    window.addEventListener('pointerdown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+  return (
+    <div className="user-menu" ref={ref}>
+      <button className="user-btn" onClick={() => setOpen(!open)} aria-expanded={open} aria-label={t('Edit profile')}>
+        <Avatar name={name} photo={photo} />
+      </button>
+      {open && (
+        <div className="user-pop" role="menu">
+          <div className="user-head">
+            <Avatar name={name} photo={photo} large />
+            <div style={{ minWidth: 0 }}>
+              <b className="ellipsis">{name || t('Your name')}</b>
+              <span className="small ellipsis">{email}</span>
+              {status && <span className={'sync ' + statusClass}><span className="sync-dot" />{status}</span>}
+            </div>
+          </div>
+          <div className="user-glance">
+            <div><span>{t('Projects in progress')}</span><b>{glance.active}</b></div>
+            <div><span>{t('Blocked tasks')}</span><b className={glance.blocked ? 'bad' : ''}>{glance.blocked}</b></div>
+            <div><span>{t("This month's margin")}</span><b>{glance.hasRevenue ? pct(glance.netRate) : '—'}</b></div>
+            <div><span>{t('To collect')}</span><b>{glance.toCollect ? money(glance.toCollect, currency) : '—'}</b></div>
+            <div><span>{t('Tracked this week')}</span><b>{fmtDuration(weekMin)}</b></div>
+          </div>
+          <div className="user-section">
+            <span className="eyebrow">{t('Theme')}</span>
+            <ThemeSwitch pref={pref} onChange={setTheme} />
+          </div>
+          <div className="user-actions">
+            <button className="btn sm outline" onClick={() => { setOpen(false); onProfile(); }}>{t('Data & profile')}</button>
+            {onSignOut && <button className="btn sm ghost" onClick={() => { setOpen(false); onSignOut(); }}>{t('Sign out')}</button>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Loading() {
   return (
     <div className="login">
       <div className="row" style={{ gap: '0.625rem', color: 'var(--muted)', fontSize: '0.8125rem', fontWeight: 600 }}>
         <BrandMark size={28} />
-        Loading…
+        {t('Loading…')}
       </div>
     </div>
   );

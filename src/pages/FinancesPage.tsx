@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { MonthPicker } from '../components/Calendar';
-import { Seg } from '../components/ui';
+import { IconTrash, Seg } from '../components/ui';
+import { removeRow } from '../lib/undo';
 import { catLabel } from '../lib/constants';
 import { allTxns, isActive, monthlyEquivalent, sumType, totals } from '../lib/finance';
 import { fmtDate, fmtMonth, isoDate, money, monthEnd, monthKey, pct, shiftMonth } from '../lib/format';
@@ -10,6 +11,7 @@ import { isOverdue, projectStats, unpaidInvoices } from '../lib/stats';
 import { fmtDuration } from '../lib/time';
 import { rateOn, taxesOn } from '../lib/tax';
 import { HBars } from '../components/Charts';
+import { t, tn } from '../lib/i18n';
 import type { AppData, Entry, Recurring } from '../types';
 
 type Update = (fn: (d: AppData) => AppData) => void;
@@ -50,10 +52,15 @@ export default function FinancesPage({ data, update, openProject, goToData }: { 
   const late = unpaid.filter((e) => isOverdue(e)).length;
   const markPaid = (e: Entry) => {
     update((d) => ({ ...d, entries: d.entries.map((x) => (x.id === e.id ? { ...x, paid: true, due: '' } : x)) }));
-    toast(<><b>{e.label}</b> marked paid · {m(e.amount)}</>, {
+    toast(<>{t('Marked paid:')} <b>{e.label}</b> · {m(e.amount)}</>, {
       tone: 'success',
       undo: () => update((d) => ({ ...d, entries: d.entries.map((x) => (x.id === e.id ? { ...x, paid: false, due: e.due } : x)) })),
     });
+  };
+  const removeE = (e: Entry) => {
+    const { restore } = removeRow(data, 'entries', e.id);
+    update((d) => removeRow(d, 'entries', e.id).data);
+    toast(<>{t('Deleted:')} <b>{e.label}</b></>, { undo: () => update(restore) });
   };
   const projectRows = data.projects
     .map((p) => ({ p, s: projectStats(data, p.id, txns) }))
@@ -65,12 +72,12 @@ export default function FinancesPage({ data, update, openProject, goToData }: { 
   const rateNow = rateOn(P.tax, isoDate());
   const untaxed = inPeriod.filter((t) => t.type === 'revenue').reduce((a, t) => a + t.amount, 0) - tax.gross;
   const kpis = [
-    { label: 'Revenue', value: m(T.rev), sub: `${revCount} ${revCount === 1 ? 'payment' : 'payments'} received`, color: 'var(--muted)', dot: 'var(--c-rev)' },
-    { label: 'Expenses', value: m(T.charges), sub: T.rev ? `${pct((T.charges / T.rev) * 100)} of revenue` : 'No revenue in this period', color: 'var(--muted)', dot: 'var(--c-exp)' },
-    { label: 'Net profit', value: m(T.net), sub: T.rev ? `Net margin ${pct(T.netRate)}` : '—', color: T.rev ? tone(T.net) : 'var(--muted)', dot: 'var(--c-pos)' },
-    { label: 'After taxes', value: m(afterTax), sub: tax.total ? `${m(tax.total)} of URSSAF & tax` : 'No taxable revenue', color: 'var(--muted)', dot: 'var(--c-pos)' },
-    { label: 'To collect', value: m(toCollect), sub: unpaid.length ? `${unpaid.length} unpaid${late ? ` · ${late} late` : ''}` : 'All invoices paid', color: late ? 'var(--red)' : 'var(--muted)', dot: 'var(--c-warn)' },
-    { label: 'Fixed costs / month', value: m(fixedCost), sub: `${subCount} active ${subCount === 1 ? 'subscription' : 'subscriptions'}${fixedRev ? ` · recurring income ${m(fixedRev)}` : ''}`, color: 'var(--muted)', dot: 'var(--c-warn)' },
+    { label: t('Revenue'), value: m(T.rev), sub: tn(revCount, '{n} payment received', '{n} payments received'), color: 'var(--muted)', dot: 'var(--c-rev)' },
+    { label: t('Expenses'), value: m(T.charges), sub: T.rev ? t('{p} of revenue', { p: pct((T.charges / T.rev) * 100) }) : t('No revenue in this period'), color: 'var(--muted)', dot: 'var(--c-exp)' },
+    { label: t('Net profit'), value: m(T.net), sub: T.rev ? t('Net margin {p}', { p: pct(T.netRate) }) : '—', color: T.rev ? tone(T.net) : 'var(--muted)', dot: 'var(--c-pos)' },
+    { label: t('After taxes'), value: m(afterTax), sub: tax.total ? t('{amount} of URSSAF & tax', { amount: m(tax.total) }) : t('No taxable revenue'), color: 'var(--muted)', dot: 'var(--c-pos)' },
+    { label: t('To collect'), value: m(toCollect), sub: unpaid.length ? (late ? t('{n} unpaid · {late} late', { n: unpaid.length, late }) : t('{n} unpaid', { n: unpaid.length })) : t('All invoices paid'), color: late ? 'var(--red)' : 'var(--muted)', dot: 'var(--c-warn)' },
+    { label: t('Fixed costs / month'), value: m(fixedCost), sub: tn(subCount, '{n} active subscription', '{n} active subscriptions') + (fixedRev ? ' · ' + t('recurring income {amount}', { amount: m(fixedRev) }) : ''), color: 'var(--muted)', dot: 'var(--c-warn)' },
   ];
 
   const cl = (x: number) => Math.max(0, Math.min(100, x)) + '%';
@@ -104,39 +111,39 @@ export default function FinancesPage({ data, update, openProject, goToData }: { 
   if (T.rev) {
     insights.push(
       T.net >= 0
-        ? { dot: 'var(--c-pos)', text: `You keep ${m(T.net)} out of ${m(T.rev)} in revenue, a net margin of ${pct(T.netRate)}.` }
-        : { dot: 'var(--c-neg)', text: `You're losing ${m(-T.net)} over this period: expenses exceed revenue by ${pct(-T.netRate)}.` },
+        ? { dot: 'var(--c-pos)', text: t('You keep {net} out of {rev} in revenue, a net margin of {p}.', { net: m(T.net), rev: m(T.rev), p: pct(T.netRate) }) }
+        : { dot: 'var(--c-neg)', text: t('You’re losing {loss} over this period: expenses exceed revenue by {p}.', { loss: m(-T.net), p: pct(-T.netRate) }) },
     );
   }
   if (cats.length && T.rev) {
     const top = cats[0];
-    insights.push({ dot: 'var(--c-warn)', text: `Your biggest expense: ${catLabel(top.name)}, ${m(top.amount)} (${pct((top.amount / T.rev) * 100)} of revenue).` });
+    insights.push({ dot: 'var(--c-warn)', text: t('Your biggest expense: {cat}, {amount} ({p} of revenue).', { cat: catLabel(top.name), amount: m(top.amount), p: pct((top.amount / T.rev) * 100) }) });
   }
-  if (fixedCost) insights.push({ dot: 'var(--c-warn)', text: `Your fixed costs are ${m(fixedCost)} a month, or ${m(fixedCost * 12)} a year, before any project.` });
+  if (fixedCost) insights.push({ dot: 'var(--c-warn)', text: t('Your fixed costs are {month} a month, or {year} a year, before any project.', { month: m(fixedCost), year: m(fixedCost * 12) }) });
   // Compare two complete months: the current one is still filling up.
   const [prev, last] = end === thisMonth ? chart.slice(-3, -1) : chart.slice(-2);
   if (prev.c && last.c) {
     const d = ((last.c - prev.c) / prev.c) * 100;
-    insights.push({ dot: d > 10 ? 'var(--c-warn)' : 'var(--c-pos)', text: `Expenses in ${fmtMonth(last.k, true)} went ${d >= 0 ? 'up' : 'down'} ${pct(Math.abs(d))} compared with ${fmtMonth(prev.k, true)}.` });
+    insights.push({ dot: d > 10 ? 'var(--c-warn)' : 'var(--c-pos)', text: t(d >= 0 ? 'Expenses in {month} went up {p} compared with {prev}.' : 'Expenses in {month} went down {p} compared with {prev}.', { month: fmtMonth(last.k, true), p: pct(Math.abs(d)), prev: fmtMonth(prev.k, true) }) });
   }
-  if (!insights.length) insights.push({ dot: 'var(--faint)', text: 'Add transactions or subscriptions in "Data & profile" to see your numbers.' });
+  if (!insights.length) insights.push({ dot: 'var(--faint)', text: t('Add transactions or subscriptions in "Data & profile" to see your numbers.') });
 
   const recent = [...inPeriod].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 7);
   const range = (from: string) =>
     `${fmtMonth(from)}${from.slice(0, 4) !== end.slice(0, 4) ? ' ' + from.slice(0, 4) : ''} – ${fmtMonth(end)} ${end.slice(0, 4)}`;
-  const periodLabel = { '1m': fmtMonth(end, true), '3m': range(cutoff), '12m': range(cutoff), all: 'All time' }[period];
+  const periodLabel = { '1m': fmtMonth(end, true), '3m': range(cutoff), '12m': range(cutoff), all: t('All time') }[period];
 
   return (
     <section className="section loose">
       <div className="head">
         <div className="head-title">
-          <h1>Finances</h1>
+          <h1>{t('Finances')}</h1>
           <span className="sub">{periodLabel}</span>
         </div>
         <div className="row">
-          <Seg label="Period" value={period} onChange={setPeriod} options={[['1m', 'Month'], ['3m', '3 months'], ['12m', '12 months'], ['all', 'All time']]} />
-          {period !== 'all' && <MonthPicker value={anchor} onChange={setAnchor} ariaLabel="Month shown" />}
-          <button className="btn" onClick={() => setEditing({ entry: newEntry() })}>+ Add a transaction</button>
+          <Seg label={t('Period')} value={period} onChange={setPeriod} options={[['1m', t('Month')], ['3m', t('3 months')], ['12m', t('12 months')], ['all', t('All time')]]} />
+          {period !== 'all' && <MonthPicker value={anchor} onChange={setAnchor} ariaLabel={t('Month shown')} />}
+          <button className="btn" onClick={() => setEditing({ entry: newEntry() })}>+ {t('Add a transaction')}</button>
         </div>
       </div>
 
@@ -154,8 +161,8 @@ export default function FinancesPage({ data, update, openProject, goToData }: { 
         <div className="card" style={{ gap: '0.5rem' }}>
           <div className="head">
             <div>
-              <div className="card-title">Waiting for payment <span className="small" style={{ fontWeight: 500 }}>{unpaid.length}</span></div>
-              <div className="small">Invoices sent but not paid yet. They count in your revenue; mark them paid when the money arrives.</div>
+              <div className="card-title">{t('Waiting for payment')} <span className="small" style={{ fontWeight: 500 }}>{unpaid.length}</span></div>
+              <div className="small">{t('Invoices sent but not paid yet. They count in your revenue; mark them paid when the money arrives.')}</div>
             </div>
             <div className="collect-total">{m(toCollect)}</div>
           </div>
@@ -165,13 +172,16 @@ export default function FinancesPage({ data, update, openProject, goToData }: { 
               const project = data.projects.find((p) => p.id === e.projectId);
               return (
                 <div className="trow t-unpaid" key={e.id}>
-                  <span className={'pay-chip' + (lateDays ? ' late' : ' waiting')}>{lateDays ? `${lateDays}d late` : e.due ? `Due ${fmtDate(e.due, true)}` : 'No due date'}</span>
-                  <button className="unpaid-label" onClick={() => setEditing({ entry: e })} title="Edit this invoice">
+                  <span className={'pay-chip' + (lateDays ? ' late' : ' waiting')}>{lateDays ? t('{n}d late', { n: lateDays }) : e.due ? t('Due {date}', { date: fmtDate(e.due, true) }) : t('No due date')}</span>
+                  <button className="unpaid-label" onClick={() => setEditing({ entry: e })} title={t('Edit this invoice')}>
                     <span className="ellipsis" style={{ fontWeight: 600 }}>{e.label}</span>
-                    <span className="small ellipsis">Sent {fmtDate(e.date, true)}{project ? ` · ${project.name}` : ''}</span>
+                    <span className="small ellipsis">{t('Sent {date}', { date: fmtDate(e.date, true) })}{project ? ` · ${project.name}` : ''}</span>
                   </button>
                   <b className="r">{m(e.amount)}</b>
-                  <button className="btn sm outline" onClick={() => markPaid(e)}>Mark paid</button>
+                  <span className="row-actions">
+                    <button className="btn sm outline" onClick={() => markPaid(e)}>{t('Mark paid')}</button>
+                    <button className="icon-btn danger" onClick={() => removeE(e)} title={t('Delete')} aria-label={t('Delete {name}', { name: e.label })}><IconTrash size={13} /></button>
+                  </span>
                 </div>
               );
             })}
@@ -182,18 +192,18 @@ export default function FinancesPage({ data, update, openProject, goToData }: { 
       <div className="grid-2 stretch">
         <div className="card" style={{ gap: '1.125rem' }}>
           <div className="head">
-            <div className="card-title">Revenue vs expenses, 6 months to {fmtMonth(end, true)}</div>
+            <div className="card-title">{t('Revenue vs expenses, 6 months to {month}', { month: fmtMonth(end, true) })}</div>
             <div className="legend">
-              <span><span className="dot" style={{ background: 'var(--c-rev)' }} />Revenue</span>
-              <span><span className="dot" style={{ background: 'var(--c-exp)' }} />Expenses</span>
+              <span><span className="dot" style={{ background: 'var(--c-rev)' }} />{t('Revenue')}</span>
+              <span><span className="dot" style={{ background: 'var(--c-exp)' }} />{t('Expenses')}</span>
             </div>
           </div>
           <div className="bars">
             {chart.map((x) => (
-              <div className="bar-pair" key={x.k} tabIndex={0} aria-label={`${fmtMonth(x.k, true)}: revenue ${m(x.r)}, expenses ${m(x.c)}`}>
+              <div className="bar-pair" key={x.k} tabIndex={0} aria-label={t('{month}: revenue {rev}, expenses {exp}', { month: fmtMonth(x.k, true), rev: m(x.r), exp: m(x.c) })}>
                 <div style={{ height: `${(x.r / max) * 100}%`, background: 'var(--c-rev)' }} />
                 <div style={{ height: `${(x.c / max) * 100}%`, background: 'var(--c-exp)' }} />
-                <span className="bar-tip">Revenue {m(x.r)} · Expenses {m(x.c)}</span>
+                <span className="bar-tip">{t('Revenue {rev} · Expenses {exp}', { rev: m(x.r), exp: m(x.c) })}</span>
               </div>
             ))}
           </div>
@@ -210,16 +220,16 @@ export default function FinancesPage({ data, update, openProject, goToData }: { 
         </div>
 
         <div className="card">
-          <div className="card-title">Where each {cur === 'EUR' ? 'euro' : 'unit'} of revenue goes</div>
+          <div className="card-title">{cur === 'EUR' ? t('Where each euro of revenue goes') : t('Where each unit of revenue goes')}</div>
           <div className="split">
             <div style={{ width: cl(share(T.direct)), background: 'var(--c-warn)' }} />
             <div style={{ width: cl(share(T.opex)), background: 'var(--c-exp)' }} />
             <div style={{ width: cl(T.netRate), background: 'var(--c-pos)' }} />
           </div>
           <div className="section" style={{ gap: '0.625rem' }}>
-            <div className="split-row"><span><span className="dot" style={{ background: 'var(--c-warn)' }} />Direct costs (subcontracting…)</span><span>{pct(share(T.direct))}</span></div>
-            <div className="split-row"><span><span className="dot" style={{ background: 'var(--c-exp)' }} />Operating expenses</span><span>{pct(share(T.opex))}</span></div>
-            <div className="split-row"><span><span className="dot" style={{ background: 'var(--c-pos)' }} />Net profit</span><span>{pct(T.netRate)}</span></div>
+            <div className="split-row"><span><span className="dot" style={{ background: 'var(--c-warn)' }} />{t('Direct costs (subcontracting…)')}</span><span>{pct(share(T.direct))}</span></div>
+            <div className="split-row"><span><span className="dot" style={{ background: 'var(--c-exp)' }} />{t('Operating expenses')}</span><span>{pct(share(T.opex))}</span></div>
+            <div className="split-row"><span><span className="dot" style={{ background: 'var(--c-pos)' }} />{t('Net profit')}</span><span>{pct(T.netRate)}</span></div>
           </div>
           <div className="insights">
             {insights.map((i) => (
@@ -233,19 +243,19 @@ export default function FinancesPage({ data, update, openProject, goToData }: { 
         <div className="card" style={{ gap: '0.875rem' }}>
           <div className="head">
             <div>
-              <div className="card-title">Taxes &amp; contributions</div>
-              <div className="small">Micro-entreprise, on business revenue of the period · {rateNow.acre ? `ACRE until ${fmtDate(P.tax.acreUntil)}` : 'normal rates'}</div>
+              <div className="card-title">{t('Taxes & contributions')}</div>
+              <div className="small">{t('Micro-entreprise, on business revenue of the period')} · {rateNow.acre ? t('ACRE until {date}', { date: fmtDate(P.tax.acreUntil) }) : t('normal rates')}</div>
             </div>
-            <button className="pill" style={{ background: 'var(--chip)', color: 'var(--ink-2)' }} onClick={goToData} title="Edit the rates in Data & profile">
-              {pct(rateNow.total)} today
+            <button className="pill" style={{ background: 'var(--chip)', color: 'var(--ink-2)' }} onClick={goToData} title={t('Edit the rates in Data & profile')}>
+              {t('{p} today', { p: pct(rateNow.total) })}
             </button>
           </div>
           <div className="tax-grid">
-            <div className="tax-row"><span>Gross revenue (taxable)</span><b>{m(tax.gross)}</b></div>
-            <div className="tax-row sub"><span>Social contributions (URSSAF) · {pct(rateNow.social)}</span><span>− {m(tax.social)}</span></div>
-            <div className="tax-row sub"><span>Training contribution (CFP) · {pct(rateNow.cfp)}</span><span>− {m(tax.cfp)}</span></div>
-            {P.tax.vl > 0 && <div className="tax-row sub"><span>Income tax, versement libératoire · {pct(rateNow.vl)}</span><span>− {m(tax.vl)}</span></div>}
-            <div className="tax-row total"><span>Net income</span><b>{m(tax.net)}</b></div>
+            <div className="tax-row"><span>{t('Gross revenue (taxable)')}</span><b>{m(tax.gross)}</b></div>
+            <div className="tax-row sub"><span>{t('Social contributions (URSSAF)')} · {pct(rateNow.social)}</span><span>− {m(tax.social)}</span></div>
+            <div className="tax-row sub"><span>{t('Training contribution (CFP)')} · {pct(rateNow.cfp)}</span><span>− {m(tax.cfp)}</span></div>
+            {P.tax.vl > 0 && <div className="tax-row sub"><span>{t('Income tax, versement libératoire')} · {pct(rateNow.vl)}</span><span>− {m(tax.vl)}</span></div>}
+            <div className="tax-row total"><span>{t('Net income')}</span><b>{m(tax.net)}</b></div>
           </div>
           {tax.gross > 0 && (
             <div className="tax-split" aria-hidden="true">
@@ -255,28 +265,28 @@ export default function FinancesPage({ data, update, openProject, goToData }: { 
             </div>
           )}
           <div className="small">
-            {untaxed > 0 ? `${m(untaxed)} of trading, investment or rental income is not counted here. ` : ''}
-            Estimate on revenue dated in the period. URSSAF counts money when it is cashed in.
+            {untaxed > 0 ? t('{amount} of trading, investment or rental income is not counted here.', { amount: m(untaxed) }) + ' ' : ''}
+            {t('Estimate on revenue dated in the period. URSSAF counts money when it is cashed in.')}
           </div>
         </div>
 
         <div className="card" style={{ gap: '1rem' }}>
           <div className="head">
-            <div className="card-title">Money by type</div>
+            <div className="card-title">{t('Money by type')}</div>
             <div className="small">{periodLabel}</div>
           </div>
           <HBars
             format={m}
             items={[
-              { id: 'revenue', label: 'Revenue', value: T.rev, color: 'var(--c-rev)', sub: `${revCount} ${revCount === 1 ? 'line' : 'lines'}` },
-              { id: 'direct', label: 'Direct costs', value: T.direct, color: 'var(--c-direct)', sub: T.rev ? `${pct((T.direct / T.rev) * 100)} of revenue` : undefined },
-              { id: 'opex', label: 'Operating expenses', value: T.opex, color: 'var(--c-exp)', sub: T.rev ? `${pct((T.opex / T.rev) * 100)} of revenue` : undefined },
+              { id: 'revenue', label: t('Revenue'), value: T.rev, color: 'var(--c-rev)', sub: tn(revCount, '{n} line', '{n} lines') },
+              { id: 'direct', label: t('Direct costs'), value: T.direct, color: 'var(--c-direct)', sub: T.rev ? t('{p} of revenue', { p: pct((T.direct / T.rev) * 100) }) : undefined },
+              { id: 'opex', label: t('Operating expenses'), value: T.opex, color: 'var(--c-exp)', sub: T.rev ? t('{p} of revenue', { p: pct((T.opex / T.rev) * 100) }) : undefined },
             ]}
           />
           <div className="type-net">
-            <span>What's left</span>
+            <span>{t('What’s left')}</span>
             <b style={{ color: T.net < 0 ? 'var(--red)' : undefined }}>{m(T.net)}</b>
-            <span className="small">{m(afterTax)} after taxes</span>
+            <span className="small">{t('{amount} after taxes', { amount: m(afterTax) })}</span>
           </div>
         </div>
       </div>
@@ -284,8 +294,8 @@ export default function FinancesPage({ data, update, openProject, goToData }: { 
       <div className="grid-2 stretch">
         <div className="card" style={{ gap: '0.875rem' }}>
           <div className="head">
-            <div className="card-title">What eats your margin</div>
-            <div className="small">Amount and share of revenue in this period</div>
+            <div className="card-title">{t('What eats your margin')}</div>
+            <div className="small">{t('Amount and share of revenue in this period')}</div>
           </div>
           {cats.map((c) => {
             const p = share(c.amount);
@@ -293,7 +303,7 @@ export default function FinancesPage({ data, update, openProject, goToData }: { 
             return (
               <div className="catbar" key={c.name}>
                 <div className="catbar-top">
-                  <span className="row" style={{ gap: '0.5rem' }}><b style={{ fontWeight: 600 }}>{catLabel(c.name)}</b><span className="mini-tag">{c.type === 'direct' ? 'Direct cost' : 'Operating'}</span></span>
+                  <span className="row" style={{ gap: '0.5rem' }}><b style={{ fontWeight: 600 }}>{catLabel(c.name)}</b><span className="mini-tag">{c.type === 'direct' ? t('Direct cost') : t('Operating')}</span></span>
                   <span className="row" style={{ gap: '0.625rem', flexWrap: 'nowrap' }}>
                     <span style={{ color: 'var(--ink-2)' }}>{m(c.amount)}</span>
                     <b style={{ minWidth: '3rem', textAlign: 'right', color }}>{T.rev ? pct(p) : '—'}</b>
@@ -303,17 +313,17 @@ export default function FinancesPage({ data, update, openProject, goToData }: { 
               </div>
             );
           })}
-          {cats.length === 0 && <div className="small">No expenses in this period.</div>}
+          {cats.length === 0 && <div className="small">{t('No expenses in this period.')}</div>}
         </div>
 
         <div className="card" style={{ gap: '0.375rem' }}>
-          <div className="card-title" style={{ marginBottom: '0.5rem' }}>Recent transactions</div>
+          <div className="card-title" style={{ marginBottom: '0.5rem' }}>{t('Recent transactions')}</div>
           {recent.map((r) => (
             <button
               type="button"
               className="trow t-recent t-click"
               key={r.id}
-              title={r.recurringId ? 'Edit this subscription' : 'Edit this transaction'}
+              title={r.recurringId ? t('Edit this subscription') : t('Edit this transaction')}
               onClick={() => {
                 if (r.recurringId) {
                   const rec = data.recurring.find((x) => x.id === r.recurringId);
@@ -326,7 +336,7 @@ export default function FinancesPage({ data, update, openProject, goToData }: { 
             >
               <span className="small">{fmtDate(r.date, r.date.slice(0, 4) === String(new Date().getFullYear()))}</span>
               <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                <span className="ellipsis" style={{ fontWeight: 600 }}>{r.label}{r.recurringId && <span className="auto-flag">recurring</span>}</span>
+                <span className="ellipsis" style={{ fontWeight: 600 }}>{r.label}{r.recurringId && <span className="auto-flag">{t('recurring')}</span>}</span>
                 <span style={{ fontSize: '0.6875rem', color: 'var(--muted)' }}>{catLabel(r.category)}</span>
               </span>
               <b style={{ color: r.type === 'revenue' ? 'var(--green)' : 'var(--ink)', whiteSpace: 'nowrap' }}>
@@ -334,22 +344,22 @@ export default function FinancesPage({ data, update, openProject, goToData }: { 
               </b>
             </button>
           ))}
-          {recent.length === 0 && <div className="small">No transactions in this period.</div>}
+          {recent.length === 0 && <div className="small">{t('No transactions in this period.')}</div>}
         </div>
       </div>
 
       {projectRows.length > 0 && (
         <div className="card" style={{ gap: '0.375rem' }}>
           <div className="head">
-            <div className="card-title">Project profitability</div>
-            <div className="small">All time, everything linked to each project · time from the tracker</div>
+            <div className="card-title">{t('Project profitability')}</div>
+            <div className="small">{t('All time, everything linked to each project · time from the tracker')}</div>
           </div>
           <div className="table-wrap">
-            <div className="trow th t-profit"><span>Project</span><span className="r">Revenue</span><span className="r">Costs</span><span className="r">Margin</span><span>Budget</span><span className="r">Time</span><span className="r">Per hour</span></div>
+            <div className="trow th t-profit"><span>{t('Project')}</span><span className="r">{t('Revenue')}</span><span className="r">{t('Costs')}</span><span className="r">{t('Margin')}</span><span>{t('Budget')}</span><span className="r">{t('Time')}</span><span className="r">{t('Per hour')}</span></div>
             {projectRows.map(({ p, s: st }) => {
               const client = data.clients.find((c) => c.id === p.clientId);
               return (
-                <button type="button" className="trow t-profit t-click" key={p.id} onClick={() => openProject(p.id)} title="Open project">
+                <button type="button" className="trow t-profit t-click" key={p.id} onClick={() => openProject(p.id)} title={t('Open project')}>
                   <span className="row ellipsis" style={{ gap: '0.5rem', flexWrap: 'nowrap', fontWeight: 600 }}>
                     <span className="swatch" style={{ background: client?.color ?? 'var(--line-strong)' }} />
                     <span className="ellipsis">{p.name}</span>
@@ -361,7 +371,7 @@ export default function FinancesPage({ data, update, openProject, goToData }: { 
                   </span>
                   <span>
                     {st.budgetUsed !== null ? (
-                      <span className="progress" title={`${pct(st.budgetUsed)} of ${m(st.budget)} invoiced`}>
+                      <span className="progress" title={t('{p} of {budget} invoiced', { p: pct(st.budgetUsed), budget: m(st.budget) })}>
                         <span className="progress-bar"><div style={{ width: `${Math.min(100, st.budgetUsed)}%`, background: st.budgetUsed > 100 ? 'var(--amber)' : undefined }} /></span>
                         <span className="small" style={{ fontWeight: 600 }}>{Math.round(st.budgetUsed)}%</span>
                       </span>
@@ -378,11 +388,11 @@ export default function FinancesPage({ data, update, openProject, goToData }: { 
 
       <div className="card" style={{ gap: '0.375rem' }}>
         <div className="head">
-          <div className="card-title">Month by month</div>
-          <div className="small">What comes in, what goes out, what's left · 12 months to {fmtMonth(end, true)}</div>
+          <div className="card-title">{t('Month by month')}</div>
+          <div className="small">{t('What comes in, what goes out, what’s left · 12 months to {month}', { month: fmtMonth(end, true) })}</div>
         </div>
         <div className="table-wrap">
-          <div className="trow th t-months"><span>Month</span><span className="r">Revenue</span><span className="r">Expenses</span><span className="r">Net</span><span className="r">Margin</span></div>
+          <div className="trow th t-months"><span>{t('Month')}</span><span className="r">{t('Revenue')}</span><span className="r">{t('Expenses')}</span><span className="r">{t('Net')}</span><span className="r">{t('Margin')}</span></div>
           {table.map((x) => (
             <div className="trow t-months" key={x.k} style={{ color: x.r || x.c ? undefined : 'var(--faint)' }}>
               <span style={{ textTransform: 'capitalize', fontWeight: 600 }}>{fmtMonth(x.k, true)}</span>
@@ -393,7 +403,7 @@ export default function FinancesPage({ data, update, openProject, goToData }: { 
             </div>
           ))}
           <div className="trow t-months total">
-            <span>Total{table.length > 1 ? ` (${table.length} months)` : ''}</span>
+            <span>{table.length > 1 ? t('Total ({n} months)', { n: table.length }) : t('Total')}</span>
             <span className="r">{m(tableTot.r)}</span>
             <span className="r">{m(tableTot.c)}</span>
             <span className="r" style={{ color: tableTot.r - tableTot.c < 0 ? 'var(--red)' : 'var(--green)' }}>{m(tableTot.r - tableTot.c)}</span>

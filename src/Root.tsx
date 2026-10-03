@@ -6,6 +6,7 @@ import { ToastProvider } from './components/Toast';
 import { createSupabaseRepository } from './lib/remote';
 import { localRepository } from './lib/store';
 import { configError, supabase } from './lib/supabase';
+import { t } from './lib/i18n';
 import LoginPage from './pages/LoginPage';
 
 /** Picks where the data lives: Supabase behind a login when configured, else this browser. */
@@ -26,9 +27,9 @@ function SetupError({ message }: { message: string }) {
   return (
     <div className="login">
       <div className="login-card section" style={{ gap: '0.75rem' }}>
-        <h1 style={{ fontSize: '1.25rem' }}>Setup problem</h1>
+        <h1 style={{ fontSize: '1.25rem' }}>{t('Setup problem')}</h1>
         <p className="sub" style={{ margin: 0, lineHeight: 1.6 }}>{message}</p>
-        <p className="sub" style={{ margin: 0, lineHeight: 1.6 }}>Fix it in Vercel (your project, Settings, Environment Variables), then redeploy.</p>
+        <p className="sub" style={{ margin: 0, lineHeight: 1.6 }}>{t('Fix it in Vercel (your project, Settings, Environment Variables), then redeploy.')}</p>
       </div>
     </div>
   );
@@ -41,8 +42,8 @@ function linkErrorFromUrl(): string {
   if (!code) return '';
   history.replaceState(null, '', window.location.pathname);
   return /expired/i.test(code + (params.get('error_description') ?? ''))
-    ? 'This link has expired or was already used. Ask for a new one.'
-    : "This sign-in link doesn't work. Ask for a new one.";
+    ? t('This link has expired or was already used. Ask for a new one.')
+    : t("This sign-in link doesn't work. Ask for a new one.");
 }
 
 function AuthGate() {
@@ -74,9 +75,9 @@ function AuthGate() {
     return (
       <div className="login">
         <div className="login-card section" style={{ gap: '0.75rem' }}>
-          <h1 style={{ fontSize: '1.25rem' }}>Offline</h1>
-          <p className="sub" style={{ margin: 0, lineHeight: 1.6 }}>Can't reach the server. Check your internet connection; everything picks up again on its own once you're back online.</p>
-          <button className="btn" style={{ alignSelf: 'flex-start' }} onClick={() => { setSession(undefined); setTries((n) => n + 1); }}>Try again</button>
+          <h1 style={{ fontSize: '1.25rem' }}>{t('Offline')}</h1>
+          <p className="sub" style={{ margin: 0, lineHeight: 1.6 }}>{t("Can't reach the server. Check your internet connection; everything picks up again on its own once you're back online.")}</p>
+          <button className="btn" style={{ alignSelf: 'flex-start' }} onClick={() => { setSession(undefined); setTries((n) => n + 1); }}>{t('Try again')}</button>
         </div>
       </div>
     );
@@ -103,9 +104,9 @@ class Boundary extends Component<{ children: ReactNode }, { failed: boolean }> {
     return (
       <div className="login">
         <div className="login-card section" style={{ gap: '0.75rem' }}>
-          <h1 style={{ fontSize: '1.25rem' }}>Something went wrong on this screen</h1>
-          <p className="sub" style={{ margin: 0, lineHeight: 1.6 }}>Your saved data is safe. Reload the page.</p>
-          <button className="btn" style={{ alignSelf: 'flex-start' }} onClick={() => window.location.reload()}>Reload</button>
+          <h1 style={{ fontSize: '1.25rem' }}>{t('Something went wrong on this screen')}</h1>
+          <p className="sub" style={{ margin: 0, lineHeight: 1.6 }}>{t('Your saved data is safe. Reload the page.')}</p>
+          <button className="btn" style={{ alignSelf: 'flex-start' }} onClick={() => window.location.reload()}>{t('Reload')}</button>
         </div>
       </div>
     );

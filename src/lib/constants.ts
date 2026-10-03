@@ -1,3 +1,4 @@
+import { t } from './i18n';
 import type { EntryType, NoteKind, Priority, ProjectStatus, TaskColumn } from '../types';
 
 /*
@@ -5,6 +6,7 @@ import type { EntryType, NoteKind, Priority, ProjectStatus, TaskColumn } from '.
  * which are partly French: the database constrains them and existing rows use them. Only the
  * labels below are shown in the UI.
  */
+/** Sorting locale (names). Display formats follow the language, see lib/i18n. */
 export const LOCALE = 'en-GB';
 
 /** Soft pill colours from one hue, readable in light and dark themes (mixed with the theme's surface and ink). */
@@ -21,7 +23,7 @@ export const STATUS_META: Record<ProjectStatus, { label: string; bg: string; col
   'On hold': { label: 'On hold', ...soft('#8b8b94') },
   'Done': { label: 'Done', ...soft('#22c55e') },
 };
-export const statusLabel = (s: ProjectStatus) => STATUS_META[s]?.label ?? s;
+export const statusLabel = (s: ProjectStatus) => t(STATUS_META[s]?.label ?? s);
 
 export const COLUMNS: { key: TaskColumn; label: string; dot: string }[] = [
   { key: 'todo', label: 'To do', dot: 'var(--faint)' },
@@ -67,7 +69,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   'Other expense': 'Other expense',
 };
 /** English label for a stored category (unknown categories are shown as stored). */
-export const catLabel = (c: string) => CATEGORY_LABELS[c] ?? c;
+export const catLabel = (c: string) => t(CATEGORY_LABELS[c] ?? c);
 
 export const TYPE_META: Record<EntryType, { label: string; short: string; bg: string; color: string }> = {
   revenue: { label: 'Revenue', short: 'Revenue', ...soft('#3b82f6') },

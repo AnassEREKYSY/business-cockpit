@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { COLUMNS, PRIORITIES } from '../lib/constants';
+import { t } from '../lib/i18n';
 import { uid } from '../lib/format';
 import { isDay, nextPosition, withCol } from '../lib/store';
 import { entryMinutes, fmtClock, fmtDuration, runningEntry, startTimer, stopTimers, useNow } from '../lib/time';
@@ -13,8 +14,8 @@ import { Field, IconPlay, IconStop, Modal } from './ui';
 
 type Update = (fn: (d: AppData) => AppData) => void;
 
-const COLUMN_OPTIONS = COLUMNS.map((c) => ({ value: c.key, label: c.label, color: c.dot }));
-const PRIORITY_OPTIONS = PRIORITIES.map((p) => ({ value: p.key, label: p.label, color: p.color }));
+const columnOptions = () => COLUMNS.map((c) => ({ value: c.key, label: t(c.label), color: c.dot }));
+const priorityOptions = () => PRIORITIES.map((p) => ({ value: p.key, label: t(p.label), color: p.color }));
 
 /** A blank task, opened in the modal to create one. */
 export const newTask = (col: TaskColumn = 'todo', projectId = ''): Task => ({
@@ -50,7 +51,7 @@ export function TaskModal({ task, data, onClose, update }: { task: Task; data: A
         ...d,
         tasks: [...d.tasks, { ...withCol({ ...f, col: 'todo' }, f.col), title, position: nextPosition(d.tasks) }],
       }));
-      toast(<>Task <b>{title}</b> added</>, { tone: 'success' });
+      toast(<>{t('Task added:')} <b>{title}</b></>, { tone: 'success' });
       onClose();
       return;
     }
@@ -70,17 +71,17 @@ export function TaskModal({ task, data, onClose, update }: { task: Task; data: A
   const remove = () => {
     const { restore } = removeRow(data, 'tasks', task.id);
     update((d) => removeRow(d, 'tasks', task.id).data);
-    toast(<>Task <b>{task.title}</b> deleted</>, { undo: () => update(restore) });
+    toast(<>{t('Task deleted:')} <b>{task.title}</b></>, { undo: () => update(restore) });
     onClose();
   };
   const toggleTimer = () => {
     if (timing) {
       const { added } = stopTimers(data);
       update((d) => stopTimers(d).data);
-      toast(added ? <>{fmtDuration(added)} logged on <b>{task.title}</b></> : 'Timer stopped (under a minute, not logged)');
+      toast(added ? <>{t('{d} logged on', { d: fmtDuration(added) })} <b>{task.title}</b></> : t('Timer stopped (under a minute, not logged)'));
     } else {
       update((d) => startTimer(d, { projectId: d.tasks.find((t) => t.id === task.id)?.projectId ?? f.projectId, taskId: task.id }));
-      toast(<>Timer started on <b>{task.title}</b></>);
+      toast(<>{t('Timer started on')} <b>{task.title}</b></>);
     }
   };
 
@@ -95,13 +96,13 @@ export function TaskModal({ task, data, onClose, update }: { task: Task; data: A
   const doneCount = items.filter((i) => i.done).length;
 
   return (
-    <Modal title={creating ? 'New task' : 'Task'} onClose={onClose}>
+    <Modal title={creating ? t('New task') : t('Task')} onClose={onClose}>
       <form className="section" onSubmit={(e) => { e.preventDefault(); save(); }}>
-        <Field label="Title">
-          <input className="input" autoFocus value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="What needs doing?" />
+        <Field label={t('Title')}>
+          <input className="input" autoFocus value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder={t('What needs doing?')} />
         </Field>
         <div className="form-grid">
-          <Field label="Client">
+          <Field label={t('Client')}>
             <ClientSelect
               data={data}
               update={update}
@@ -110,25 +111,25 @@ export function TaskModal({ task, data, onClose, update }: { task: Task; data: A
               inherited={projectClient(f.projectId)}
             />
           </Field>
-          <Field label="Project">
+          <Field label={t('Project')}>
             <ProjectSelect projects={data.projects} clients={data.clients} value={f.projectId} onChange={pickProject} />
           </Field>
-          <Field label="Column">
-            <Select value={f.col} onChange={(col) => setF({ ...f, col })} options={COLUMN_OPTIONS} ariaLabel="Column" />
+          <Field label={t('Column')}>
+            <Select value={f.col} onChange={(col) => setF({ ...f, col })} options={columnOptions()} ariaLabel={t('Column')} />
           </Field>
-          <Field label="Priority">
-            <Select value={f.priority} onChange={(priority) => setF({ ...f, priority })} options={PRIORITY_OPTIONS} ariaLabel="Priority" />
+          <Field label={t('Priority')}>
+            <Select value={f.priority} onChange={(priority) => setF({ ...f, priority })} options={priorityOptions()} ariaLabel={t('Priority')} />
           </Field>
-          <Field label="Due">
-            <DatePicker value={f.due} onChange={(due) => setF({ ...f, due })} placeholder="No due date" ariaLabel="Due" />
+          <Field label={t('Due')}>
+            <DatePicker value={f.due} onChange={(due) => setF({ ...f, due })} placeholder={t('No due date')} ariaLabel={t('Due')} />
           </Field>
         </div>
 
         <div className="checklist">
           <div className="checklist-head">
-            <span className="field-label">Checklist</span>
+            <span className="field-label">{t('Checklist')}</span>
             {items.length > 0 && (
-              <span className="small">{doneCount}/{items.length} done</span>
+              <span className="small">{t('{d}/{n} done', { d: doneCount, n: items.length })}</span>
             )}
           </div>
           {items.length > 0 && (
@@ -149,11 +150,11 @@ export function TaskModal({ task, data, onClose, update }: { task: Task; data: A
               <input
                 className="check-text"
                 value={it.text}
-                aria-label={`Checklist item ${i + 1}`}
+                aria-label={t('Checklist item {n}', { n: i + 1 })}
                 onChange={(e) => setItems(items.map((x) => (x.id === it.id ? { ...x, text: e.target.value } : x)))}
                 onBlur={(e) => !e.target.value.trim() && setItems(items.filter((x) => x.id !== it.id))}
               />
-              <button type="button" className="x" aria-label="Remove item" onClick={() => setItems(items.filter((x) => x.id !== it.id))}>×</button>
+              <button type="button" className="x" aria-label={t('Remove item')} onClick={() => setItems(items.filter((x) => x.id !== it.id))}>×</button>
             </div>
           ))}
           <div className="check-add">
@@ -167,35 +168,35 @@ export function TaskModal({ task, data, onClose, update }: { task: Task; data: A
                   addItem();
                 }
               }}
-              placeholder="Add an item and press Enter"
-              aria-label="New checklist item"
+              placeholder={t('Add an item and press Enter')}
+              aria-label={t('New checklist item')}
             />
           </div>
         </div>
 
-        <Field label="Note"><textarea className="input" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="Details, link, next step…" /></Field>
+        <Field label={t('Note')}><textarea className="input" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder={t('Details, link, next step…')} /></Field>
 
         {!creating && (
           <div className="task-time">
             <div>
-              <div className="field-label">Time</div>
+              <div className="field-label">{t('Time')}</div>
               <div className="task-time-v">
                 {timing && running ? <span className="live-dot" /> : null}
                 {timing && running ? fmtClock(now - Date.parse(running.startedAt) + running.minutes * 60_000) : fmtDuration(logged)}
-                <span className="small">{timing ? ' running' : logged ? ' logged on this task' : ' nothing logged yet'}</span>
+                <span className="small">{' '}{timing ? t('running') : logged ? t('logged on this task') : t('nothing logged yet')}</span>
               </div>
             </div>
             <button type="button" className={'btn sm ' + (timing ? 'danger' : 'outline')} onClick={toggleTimer}>
-              {timing ? <><IconStop size={11} /> Stop</> : <><IconPlay size={11} /> Start timer</>}
+              {timing ? <><IconStop size={11} /> {t('Stop')}</> : <><IconPlay size={11} /> {t('Start timer')}</>}
             </button>
           </div>
         )}
 
         <div className="modal-foot">
-          {creating ? <span /> : <button className="btn sm danger" type="button" onClick={remove}>Delete</button>}
+          {creating ? <span /> : <button className="btn sm danger" type="button" onClick={remove}>{t('Delete')}</button>}
           <div className="row" style={{ gap: '0.5rem' }}>
-            <button className="btn sm ghost" type="button" onClick={onClose}>Cancel</button>
-            <button className="btn sm" type="submit" disabled={!f.title.trim()}>{creating ? 'Create task' : 'Save'}</button>
+            <button className="btn sm ghost" type="button" onClick={onClose}>{t('Cancel')}</button>
+            <button className="btn sm" type="submit" disabled={!f.title.trim()}>{creating ? t('Create task') : t('Save')}</button>
           </div>
         </div>
       </form>

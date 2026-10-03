@@ -13,16 +13,18 @@ import { isTaxable, rateOn } from '../lib/tax';
 import { pct } from '../lib/format';
 import { Select } from './Select';
 import { Field, Modal, Seg } from './ui';
+import { t } from '../lib/i18n';
 
 /* Edit forms for money rows, opened from Finances and from Data & profile. */
 
 type Update = (fn: (d: AppData) => AppData) => void;
 
 export const TYPES: EntryType[] = ['revenue', 'direct', 'opex'];
-export const TYPE_OPTIONS = TYPES.map((t) => ({ value: t, label: TYPE_META[t].label, color: TYPE_META[t].color }));
-export const FREQ_OPTIONS = [
-  { value: 'monthly' as const, label: 'Monthly' },
-  { value: 'yearly' as const, label: 'Yearly' },
+// Functions, not constants: the labels follow the current language.
+export const typeOptions = () => TYPES.map((k) => ({ value: k, label: t(TYPE_META[k].label), color: TYPE_META[k].color }));
+export const freqOptions = () => [
+  { value: 'monthly' as const, label: t('Monthly') },
+  { value: 'yearly' as const, label: t('Yearly') },
 ];
 export const catOptions = (t: EntryType) => CATEGORIES[t].map((c) => ({ value: c, label: catLabel(c) }));
 
@@ -37,6 +39,13 @@ export function RecurringModal({ item, data, update, onClose }: { item: Recurrin
   const valid = !!f.label.trim() && !!amount && isDay(f.start) && (!f.end || isDay(f.end)) && !endBeforeStart;
   const projects = data.projects.filter((p) => p.status !== 'Done' || p.id === f.projectId);
 
+  const toastR = useToast();
+  const remove = () => {
+    const { restore } = removeRow(data, 'recurring', item.id);
+    update((d) => removeRow(d, 'recurring', item.id).data);
+    toastR(<>{t('Deleted with its history:')} <b>{item.label}</b></>, { undo: () => update(restore) });
+    onClose();
+  };
   const save = () => {
     if (!valid || !amount) return;
     const next: Recurring = { ...f, label: f.label.trim(), amount };
@@ -48,46 +57,45 @@ export function RecurringModal({ item, data, update, onClose }: { item: Recurrin
   };
 
   return (
-    <Modal title="Edit recurring item" onClose={onClose}>
+    <Modal title={t('Edit recurring item')} onClose={onClose}>
       <form className="section" onSubmit={(e) => { e.preventDefault(); save(); }}>
         <div className="form-grid">
-          <Field label="Name"><input className="input" value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} /></Field>
-          <Field label="Type">
-            <Select value={f.type} onChange={(t) => setF({ ...f, type: t, category: CATEGORIES[t].includes(f.category) ? f.category : CATEGORIES[t][0] })} options={TYPE_OPTIONS} ariaLabel="Type" />
+          <Field label={t('Name')}><input className="input" value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} /></Field>
+          <Field label={t('Type')}>
+            <Select value={f.type} onChange={(t) => setF({ ...f, type: t, category: CATEGORIES[t].includes(f.category) ? f.category : CATEGORIES[t][0] })} options={typeOptions()} ariaLabel={t('Type')} />
           </Field>
-          <Field label="Category">
-            <Select value={f.category} onChange={(category) => setF({ ...f, category })} options={catOptions(f.type)} ariaLabel="Category" />
+          <Field label={t('Category')}>
+            <Select value={f.category} onChange={(category) => setF({ ...f, category })} options={catOptions(f.type)} ariaLabel={t('Category')} />
           </Field>
-          <Field label={`Amount excl. tax (${data.profile.currency})`}>
+          <Field label={t('Amount excl. tax ({currency})', { currency: data.profile.currency })}>
             <input className="input" inputMode="decimal" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
           </Field>
-          <Field label="Frequency">
-            <Select value={f.frequency} onChange={(frequency) => setF({ ...f, frequency })} options={FREQ_OPTIONS} ariaLabel="Frequency" />
+          <Field label={t('Frequency')}>
+            <Select value={f.frequency} onChange={(frequency) => setF({ ...f, frequency })} options={freqOptions()} ariaLabel={t('Frequency')} />
           </Field>
-          <Field label="Project (optional)">
+          <Field label={t('Project (optional)')}>
             <ProjectSelect projects={projects} clients={data.clients} value={f.projectId} onChange={(projectId) => setF({ ...f, projectId })} />
           </Field>
-          <Field label="Client (optional)">
+          <Field label={t('Client (optional)')}>
             <ClientSelect data={data} update={update} value={f.clientId} onChange={(clientId) => setF({ ...f, clientId })} inherited={data.clients.find((c) => c.id === data.projects.find((p) => p.id === f.projectId)?.clientId)} />
           </Field>
-          <Field label="Start date">
-            <DatePicker value={f.start} onChange={(start) => setF({ ...f, start })} clearable={false} ariaLabel="Start date" />
+          <Field label={t('Start date')}>
+            <DatePicker value={f.start} onChange={(start) => setF({ ...f, start })} clearable={false} ariaLabel={t('Start date')} />
           </Field>
-          <Field label="End date (optional)">
-            <DatePicker value={f.end} onChange={(end) => setF({ ...f, end })} min={isDay(f.start) ? f.start : undefined} placeholder="No end date" ariaLabel="End date" />
+          <Field label={t('End date (optional)')}>
+            <DatePicker value={f.end} onChange={(end) => setF({ ...f, end })} min={isDay(f.start) ? f.start : undefined} placeholder={t('No end date')} ariaLabel={t('End date')} />
           </Field>
         </div>
-        {f.amount.trim() && !amount && <div className="small" style={{ color: 'var(--red)' }}>Invalid amount. Examples: 1200 · 1 200 · 1200.50</div>}
-        {endBeforeStart && <div className="small" style={{ color: 'var(--red)' }}>The end date can't be before the start date.</div>}
+        {f.amount.trim() && !amount && <div className="small" style={{ color: 'var(--red)' }}>{t('Invalid amount. Examples: 1200 · 1 200 · 1200.50')}</div>}
+        {endBeforeStart && <div className="small" style={{ color: 'var(--red)' }}>{t('The end date can’t be before the start date.')}</div>}
         <div className="small">
-          Every billing date between the start and the end counts in your finances, past months included. If the price changed at some point,
-          set an end date here and add a new item from the change date, so the old months keep the old price.
+          {t('Every billing date between the start and the end counts in your finances, past months included. If the price changed at some point, set an end date here and add a new item from the change date, so the old months keep the old price.')}
         </div>
         <div className="modal-foot">
-          <span />
+          <button className="btn sm danger" type="button" onClick={remove}>{t('Delete')}</button>
           <div className="row" style={{ gap: '0.5rem' }}>
-            <button className="btn sm ghost" type="button" onClick={onClose}>Cancel</button>
-            <button className="btn sm" type="submit" disabled={!valid}>Save</button>
+            <button className="btn sm ghost" type="button" onClick={onClose}>{t('Cancel')}</button>
+            <button className="btn sm" type="submit" disabled={!valid}>{t('Save')}</button>
           </div>
         </div>
       </form>
@@ -118,7 +126,7 @@ export function EntryModal({ entry, data, update, onClose }: { entry: Entry; dat
     const next: Entry = { ...f, label: f.label.trim() || catLabel(f.category), amount, paid: !revenue || f.paid, due: revenue && !f.paid ? f.due : '' };
     if (creating) {
       update((d) => ({ ...d, entries: [...d.entries, next] }));
-      toast(<>{TYPE_META[next.type].label} <b>{next.label}</b> added: {money(amount, data.profile.currency)}</>, {
+      toast(<>{t('Transaction added ({type}):', { type: t(TYPE_META[next.type].label) })} <b>{next.label}</b> · {money(amount, data.profile.currency)}</>, {
         undo: () => update((d) => ({ ...d, entries: d.entries.filter((e) => e.id !== next.id) })),
       });
       onClose();
@@ -133,61 +141,61 @@ export function EntryModal({ entry, data, update, onClose }: { entry: Entry; dat
   const remove = () => {
     const { restore } = removeRow(data, 'entries', entry.id);
     update((d) => removeRow(d, 'entries', entry.id).data);
-    toast(<><b>{entry.label}</b> deleted</>, { undo: () => update(restore) });
+    toast(<>{t('Deleted:')} <b>{entry.label}</b></>, { undo: () => update(restore) });
     onClose();
   };
 
   return (
-    <Modal title={creating ? 'New transaction' : 'Edit transaction'} onClose={onClose}>
+    <Modal title={creating ? t('New transaction') : t('Edit transaction')} onClose={onClose}>
       <form className="section" onSubmit={(e) => { e.preventDefault(); save(); }}>
         <div className="form-grid">
-          <Field label="Date"><DatePicker value={f.date} onChange={(date) => setF({ ...f, date })} clearable={false} ariaLabel="Date" /></Field>
-          <Field label="Label"><input className="input" value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} /></Field>
-          <Field label="Type">
-            <Select value={f.type} onChange={(t) => setF({ ...f, type: t, category: CATEGORIES[t].includes(f.category) ? f.category : CATEGORIES[t][0] })} options={TYPE_OPTIONS} ariaLabel="Type" />
+          <Field label={t('Date')}><DatePicker value={f.date} onChange={(date) => setF({ ...f, date })} clearable={false} ariaLabel={t('Date')} /></Field>
+          <Field label={t('Label')}><input className="input" value={f.label} onChange={(e) => setF({ ...f, label: e.target.value })} /></Field>
+          <Field label={t('Type')}>
+            <Select value={f.type} onChange={(t) => setF({ ...f, type: t, category: CATEGORIES[t].includes(f.category) ? f.category : CATEGORIES[t][0] })} options={typeOptions()} ariaLabel={t('Type')} />
           </Field>
-          <Field label="Category">
-            <Select value={f.category} onChange={(category) => setF({ ...f, category })} options={catOptions(f.type)} ariaLabel="Category" />
+          <Field label={t('Category')}>
+            <Select value={f.category} onChange={(category) => setF({ ...f, category })} options={catOptions(f.type)} ariaLabel={t('Category')} />
           </Field>
-          <Field label="Project (optional)">
+          <Field label={t('Project (optional)')}>
             <ProjectSelect projects={projects} clients={data.clients} value={f.projectId} onChange={(projectId) => setF({ ...f, projectId, clientId: projectClient(projectId) === f.clientId ? '' : f.clientId })} />
           </Field>
-          <Field label="Client (optional)">
+          <Field label={t('Client (optional)')}>
             <ClientSelect data={data} update={update} value={f.clientId} onChange={(clientId) => setF({ ...f, clientId: clientId === projectClient(f.projectId) ? '' : clientId })} inherited={data.clients.find((c) => c.id === projectClient(f.projectId))} />
           </Field>
-          <Field label={`Amount excl. tax (${data.profile.currency})`}>
+          <Field label={t('Amount excl. tax ({currency})', { currency: data.profile.currency })}>
             <input className="input" inputMode="decimal" autoFocus={creating} value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} placeholder="0" />
           </Field>
           {revenue && (
-            <Field label="Payment">
-              <Seg label="Payment" value={f.paid ? 'paid' : 'unpaid'} onChange={(v) => setF({ ...f, paid: v === 'paid' })} options={[['paid', 'Paid'], ['unpaid', 'Waiting']]} />
+            <Field label={t('Payment')}>
+              <Seg label={t('Payment')} value={f.paid ? 'paid' : 'unpaid'} onChange={(v) => setF({ ...f, paid: v === 'paid' })} options={[['paid', t('Paid')], ['unpaid', t('Waiting')]]} />
             </Field>
           )}
           {revenue && !f.paid && (
-            <Field label="Payment due">
-              <DatePicker value={f.due} onChange={(due) => setF({ ...f, due })} min={isDay(f.date) ? f.date : undefined} placeholder="No due date" ariaLabel="Payment due" />
+            <Field label={t('Payment due')}>
+              <DatePicker value={f.due} onChange={(due) => setF({ ...f, due })} min={isDay(f.date) ? f.date : undefined} placeholder={t('No due date')} ariaLabel={t('Payment due')} />
             </Field>
           )}
         </div>
-        {f.amount.trim() && !amount && <div className="small" style={{ color: 'var(--red)' }}>Invalid amount. Examples: 1200 · 1 200 · 1200.50</div>}
+        {f.amount.trim() && !amount && <div className="small" style={{ color: 'var(--red)' }}>{t('Invalid amount. Examples: 1200 · 1 200 · 1200.50')}</div>}
         {amount && isTaxable(f) && isDay(f.date) && (() => {
           const r = rateOn(data.profile.tax, f.date);
-          const t = (amount * r.total) / 100;
+          const tx = (amount * r.total) / 100;
           return (
             <div className="tax-preview">
-              <span>Taxes {pct(r.total)}{r.acre ? ' (ACRE)' : ''}</span>
-              <b>− {money(t, data.profile.currency)}</b>
-              <span>Net</span>
-              <b>{money(amount - t, data.profile.currency)}</b>
+              <span>{t('Taxes {p}', { p: pct(r.total) })}{r.acre ? ' (ACRE)' : ''}</span>
+              <b>− {money(tx, data.profile.currency)}</b>
+              <span>{t('Net')}</span>
+              <b>{money(amount - tx, data.profile.currency)}</b>
             </div>
           );
         })()}
-        {amount && f.type === 'revenue' && !isTaxable(f) && <div className="small">Not business turnover: no URSSAF contributions are counted on this category.</div>}
+        {amount && f.type === 'revenue' && !isTaxable(f) && <div className="small">{t('Not business turnover: no URSSAF contributions are counted on this category.')}</div>}
         <div className="modal-foot">
-          {creating ? <span /> : <button className="btn sm danger" type="button" onClick={remove}>Delete</button>}
+          {creating ? <span /> : <button className="btn sm danger" type="button" onClick={remove}>{t('Delete')}</button>}
           <div className="row" style={{ gap: '0.5rem' }}>
-            <button className="btn sm ghost" type="button" onClick={onClose}>Cancel</button>
-            <button className="btn sm" type="submit" disabled={!valid}>{creating ? 'Add' : 'Save'}</button>
+            <button className="btn sm ghost" type="button" onClick={onClose}>{t('Cancel')}</button>
+            <button className="btn sm" type="submit" disabled={!valid}>{creating ? t('Add') : t('Save')}</button>
           </div>
         </div>
       </form>

@@ -1,6 +1,7 @@
 import { inkOn, nextColor } from '../lib/colors';
 import { LOCALE } from '../lib/constants';
 import { uid } from '../lib/format';
+import { t } from '../lib/i18n';
 import type { AppData, Client, Project } from '../types';
 import { Select, type Option } from './Select';
 
@@ -25,7 +26,7 @@ export function ClientDot({ client }: { client?: Client }) {
 }
 
 /** Pick a client, or type a new name to create it on the spot (it gets the next free color). */
-export function ClientSelect({ data, update, value, onChange, size, ariaLabel = 'Client', inherited }: {
+export function ClientSelect({ data, update, value, onChange, size, ariaLabel = t('Client'), inherited }: {
   data: AppData;
   update: Update;
   value: string;
@@ -35,7 +36,7 @@ export function ClientSelect({ data, update, value, onChange, size, ariaLabel = 
   /** Client that applies when none is chosen (the project's): shown as the empty option. */
   inherited?: Client;
 }) {
-  const empty = inherited ? `Project's client (${inherited.name})` : 'No client';
+  const empty = inherited ? t("Project's client ({name})", { name: inherited.name }) : t('No client');
   const options: Option[] = [
     { value: '', label: empty, color: inherited?.color },
     ...data.clients.map((c) => ({ value: c.id, label: c.name, color: c.color })),
@@ -52,7 +53,7 @@ export function ClientSelect({ data, update, value, onChange, size, ariaLabel = 
       options={options}
       placeholder={empty}
       onCreate={create}
-      createLabel={(t) => `New client "${t}"`}
+      createLabel={(text) => t('New client "{text}"', { text })}
       size={size}
       ariaLabel={ariaLabel}
     />
@@ -60,7 +61,7 @@ export function ClientSelect({ data, update, value, onChange, size, ariaLabel = 
 }
 
 /** Pick a project; each option shows its client's color and name. */
-export function ProjectSelect({ projects, clients, value, onChange, size, ariaLabel = 'Project' }: {
+export function ProjectSelect({ projects, clients, value, onChange, size, ariaLabel = t('Project') }: {
   projects: Project[];
   clients: Client[];
   value: string;
@@ -70,11 +71,11 @@ export function ProjectSelect({ projects, clients, value, onChange, size, ariaLa
 }) {
   const byId = new Map(clients.map((c) => [c.id, c]));
   const options: Option[] = [
-    { value: '', label: 'No project' },
+    { value: '', label: t('No project') },
     ...projects.map((p) => {
       const c = byId.get(p.clientId);
       return { value: p.id, label: p.name, color: c?.color, hint: c?.name };
     }),
   ];
-  return <Select value={value} onChange={onChange} options={options} placeholder="No project" size={size} ariaLabel={ariaLabel} />;
+  return <Select value={value} onChange={onChange} options={options} placeholder={t('No project')} size={size} ariaLabel={ariaLabel} />;
 }

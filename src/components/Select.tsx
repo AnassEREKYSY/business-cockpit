@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { t } from '../lib/i18n';
 import { Popover } from './Popover';
 
 export type Option<T extends string = string> = {
@@ -30,8 +31,8 @@ const norm = (s: string) => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').to
 
 /** Dropdown matching the app's look, with keyboard support, search and quick create. */
 export function Select<T extends string>({
-  value, onChange, options, placeholder = 'Choose…', searchable, onCreate,
-  createLabel = (t) => `Create "${t}"`, size = 'md', ariaLabel, className = '',
+  value, onChange, options, placeholder = t('Choose…'), searchable, onCreate,
+  createLabel = (text) => t('Create "{text}"', { text }), size = 'md', ariaLabel, className = '',
 }: Props<T>) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -139,7 +140,7 @@ export function Select<T extends string>({
                 setActive(0);
               }}
               onKeyDown={onKey}
-              placeholder={onCreate ? 'Search or create…' : 'Search…'}
+              placeholder={onCreate ? t('Search or create…') : t('Search…')}
               aria-controls={id}
               aria-activedescendant={count ? `${id}-${active}` : undefined}
             />
@@ -183,7 +184,7 @@ export function Select<T extends string>({
               <span className="pop-label">{createLabel(query.trim())}</span>
             </div>
           )}
-          {!count && <div className="pop-empty">No results</div>}
+          {!count && <div className="pop-empty">{t('No results')}</div>}
         </div>
       </Popover>
     </>

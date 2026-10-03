@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { t, locale } from '../lib/i18n';
 
 /*
  * Small SVG charts in the app's look: thin marks, recessive grid, one axis, a tooltip on hover,
@@ -56,7 +57,7 @@ export function Donut({ slices, format, center, size = 168 }: { slices: Slice[];
   const active = arcs.find((a) => a.id === hover);
   return (
     <div className="donut-wrap">
-      <svg className="donut" viewBox="0 0 100 100" width={size} height={size} role="img" aria-label="Share chart">
+      <svg className="donut" viewBox="0 0 100 100" width={size} height={size} role="img" aria-label={t('Share chart')}>
         <circle cx="50" cy="50" r={r} fill="none" stroke="var(--track)" strokeWidth="11" />
         {arcs.map((a) => (
           <circle
@@ -191,7 +192,7 @@ export function LineChart({ points, lines, format, formatT, height = 220 }: {
     const t = niceTicks(hi);
     return { min: lo, max: t[t.length - 1], ticks: t };
   }, [points]);
-  if (points.length < 2) return <div className="chart-empty">Not enough history yet</div>;
+  if (points.length < 2) return <div className="chart-empty">{t('Not enough history yet')}</div>;
   const x = (i: number) => pad.l + (i / (points.length - 1)) * (W - pad.l - pad.r);
   const y = (v: number) => pad.t + (1 - (v - min) / (max - min || 1)) * (H - pad.t - pad.b);
   const path = (k: number) => points.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.values[k]).toFixed(1)}`).join(' ');
@@ -269,7 +270,7 @@ export function niceTicks(max: number): number[] {
 /** Compact money for axes: €12k, €1.2M. */
 export function compactMoney(n: number, currency: string): string {
   try {
-    return new Intl.NumberFormat('en-GB', { style: 'currency', currency, notation: 'compact', maximumFractionDigits: 1 }).format(n);
+    return new Intl.NumberFormat(locale(), { style: 'currency', currency, notation: 'compact', maximumFractionDigits: 1 }).format(n);
   } catch {
     return String(Math.round(n));
   }

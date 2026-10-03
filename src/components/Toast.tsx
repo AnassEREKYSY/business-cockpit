@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { t } from '../lib/i18n';
 
 type ToastOptions = {
   /** Shows an Undo button; called once if pressed. */
@@ -73,10 +74,10 @@ function Toast({ item, onDismiss }: { item: Item; onDismiss: () => void }) {
             onDismiss();
           }}
         >
-          Undo
+          {t('Undo')}
         </button>
       )}
-      <button className="toast-x" onClick={onDismiss} aria-label="Dismiss">×</button>
+      <button className="toast-x" onClick={onDismiss} aria-label={t('Dismiss')}>×</button>
       <span className="toast-bar" style={{ animationDuration: `${duration}ms`, animationPlayState: paused ? 'paused' : 'running' }} />
     </div>
   );

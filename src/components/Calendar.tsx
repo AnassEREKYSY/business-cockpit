@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { LOCALE } from '../lib/constants';
+import { locale, t } from '../lib/i18n';
 import { fmtDate, fmtMonth, isoDate, monthKey, shiftMonth } from '../lib/format';
 import { Popover } from './Popover';
 
@@ -8,10 +8,9 @@ import { Popover } from './Popover';
  * different in every browser). Values stay plain strings: 'YYYY-MM-DD' for days, 'YYYY-MM' for months.
  */
 
-const WEEKDAYS = Array.from({ length: 7 }, (_, i) =>
-  new Date(2024, 0, 1 + i).toLocaleDateString(LOCALE, { weekday: 'short' }).slice(0, 2),
-); // 1 Jan 2024 was a Monday: weeks start on Monday
-const MONTHS = Array.from({ length: 12 }, (_, i) => new Date(2024, i, 15).toLocaleDateString(LOCALE, { month: 'short' }).slice(0, 3));
+// Computed on use, so they follow the language. 1 Jan 2024 was a Monday: weeks start on Monday.
+const weekdays = () => Array.from({ length: 7 }, (_, i) => new Date(2024, 0, 1 + i).toLocaleDateString(locale(), { weekday: 'short' }).slice(0, 2));
+const months = () => Array.from({ length: 12 }, (_, i) => fmtMonth(`2024-${String(i + 1).padStart(2, '0')}`));
 
 const addDays = (day: string, n: number) => {
   const [y, m, d] = day.split('-').map(Number);
@@ -49,7 +48,7 @@ function MonthGrid({ year, selected, onPick, min, max }: { year: number; selecte
   };
   return (
     <div className="cal-months" role="grid" aria-label={String(year)} onKeyDown={onKey}>
-      {MONTHS.map((label, i) => {
+      {months().map((label, i) => {
         const key = `${year}-${String(i + 1).padStart(2, '0')}`;
         const off = (min && key < min) || (max && key > max);
         return (
@@ -73,7 +72,7 @@ function MonthGrid({ year, selected, onPick, min, max }: { year: number; selecte
 /* ---------------- DatePicker ---------------- */
 
 export function DatePicker({
-  value, onChange, placeholder = 'Pick a date', clearable = true, min = '2000-01-01', max = '2099-12-31',
+  value, onChange, placeholder = t('Pick a date'), clearable = true, min = '2000-01-01', max = '2099-12-31',
   size = 'md', ariaLabel, className = '',
 }: {
   value: string;
@@ -188,15 +187,15 @@ export function DatePicker({
         <span className="date-icon"><IconCalendar /></span>
         <span className={'select-value' + (value ? '' : ' is-placeholder')}>{value ? fmtDate(value) : placeholder}</span>
       </button>
-      <Popover anchor={button} panelRef={panel} open={open} onClose={() => close(false)} minWidth={264} label={ariaLabel ?? 'Calendar'}>
+      <Popover anchor={button} panelRef={panel} open={open} onClose={() => close(false)} minWidth={264} label={ariaLabel ?? t('Calendar')}>
         <div className="cal" onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } }}>
           <div className="cal-head">
-            <button type="button" className="cal-nav" aria-label={view === 'days' ? 'Previous month' : 'Previous year'}
+            <button type="button" className="cal-nav" aria-label={view === 'days' ? t('Previous month') : t('Previous year')}
               onClick={() => (view === 'days' ? stepMonth(-1) : stepMonth(-12))}><Chev dir="left" /></button>
-            <button type="button" className="cal-title" onClick={() => { focusMonths.current = true; setView(view === 'days' ? 'months' : 'days'); }} aria-label="Choose month and year">
+            <button type="button" className="cal-title" onClick={() => { focusMonths.current = true; setView(view === 'days' ? 'months' : 'days'); }} aria-label={t('Choose month and year')}>
               {view === 'days' ? fmtMonth(shown, true) : shown.slice(0, 4)}
             </button>
-            <button type="button" className="cal-nav" aria-label={view === 'days' ? 'Next month' : 'Next year'}
+            <button type="button" className="cal-nav" aria-label={view === 'days' ? t('Next month') : t('Next year')}
               onClick={() => (view === 'days' ? stepMonth(1) : stepMonth(12))}><Chev dir="right" /></button>
           </div>
 
@@ -213,7 +212,7 @@ export function DatePicker({
             />
           ) : (
             <div ref={grid} className="cal-grid" role="grid" onKeyDown={onKey}>
-              {WEEKDAYS.map((w) => <span key={w} className="cal-wd" aria-hidden="true">{w}</span>)}
+              {weekdays().map((w) => <span key={w} className="cal-wd" aria-hidden="true">{w}</span>)}
               {days.map((d) => {
                 const off = d < min || d > max;
                 const cls =
@@ -241,9 +240,9 @@ export function DatePicker({
           )}
 
           <div className="cal-foot">
-            <button type="button" className="link-btn" disabled={today < min || today > max} onClick={() => pick(today)}>Today</button>
+            <button type="button" className="link-btn" disabled={today < min || today > max} onClick={() => pick(today)}>{t('Today')}</button>
             {clearable && value && (
-              <button type="button" className="link-btn muted" onClick={() => pick('')}>Clear</button>
+              <button type="button" className="link-btn muted" onClick={() => pick('')}>{t('Clear')}</button>
             )}
           </div>
         </div>
@@ -255,7 +254,7 @@ export function DatePicker({
 /* ---------------- MonthPicker ---------------- */
 
 /** ‹ Month year › with a year grid in between; months after `max` can't be picked. */
-export function MonthPicker({ value, onChange, max = monthKey(), min = '2000-01', ariaLabel = 'Month' }: {
+export function MonthPicker({ value, onChange, max = monthKey(), min = '2000-01', ariaLabel = t('Month') }: {
   value: string;
   onChange: (key: string) => void;
   max?: string;
@@ -280,7 +279,7 @@ export function MonthPicker({ value, onChange, max = monthKey(), min = '2000-01'
 
   return (
     <div className="month-picker">
-      <button type="button" className="cal-nav" aria-label="Previous month" aria-disabled={prev < min} onClick={() => prev >= min && onChange(prev)}><Chev dir="left" /></button>
+      <button type="button" className="cal-nav" aria-label={t('Previous month')} aria-disabled={prev < min} onClick={() => prev >= min && onChange(prev)}><Chev dir="left" /></button>
       <button
         ref={button}
         type="button"
@@ -303,13 +302,13 @@ export function MonthPicker({ value, onChange, max = monthKey(), min = '2000-01'
         <span className="date-icon"><IconCalendar /></span>
         <span className="select-value" style={{ textTransform: 'capitalize' }}>{fmtMonth(value, true)}</span>
       </button>
-      <button type="button" className="cal-nav" aria-label="Next month" aria-disabled={next > max} onClick={() => next <= max && onChange(next)}><Chev dir="right" /></button>
-      <Popover anchor={button} panelRef={panel} open={open} onClose={() => setOpen(false)} minWidth={240} label="Choose a month">
+      <button type="button" className="cal-nav" aria-label={t('Next month')} aria-disabled={next > max} onClick={() => next <= max && onChange(next)}><Chev dir="right" /></button>
+      <Popover anchor={button} panelRef={panel} open={open} onClose={() => setOpen(false)} minWidth={240} label={t('Choose a month')}>
         <div className="cal" onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); button.current?.focus(); } }}>
           <div className="cal-head">
-            <button type="button" className="cal-nav" aria-label="Previous year" aria-disabled={`${year - 1}-12` < min} onClick={() => `${year - 1}-12` >= min && setYear(year - 1)}><Chev dir="left" /></button>
+            <button type="button" className="cal-nav" aria-label={t('Previous year')} aria-disabled={`${year - 1}-12` < min} onClick={() => `${year - 1}-12` >= min && setYear(year - 1)}><Chev dir="left" /></button>
             <span className="cal-title is-static">{year}</span>
-            <button type="button" className="cal-nav" aria-label="Next year" aria-disabled={`${year + 1}-01` > max} onClick={() => `${year + 1}-01` <= max && setYear(year + 1)}><Chev dir="right" /></button>
+            <button type="button" className="cal-nav" aria-label={t('Next year')} aria-disabled={`${year + 1}-01` > max} onClick={() => `${year + 1}-01` <= max && setYear(year + 1)}><Chev dir="right" /></button>
           </div>
           <MonthGrid
             year={year}
@@ -323,7 +322,7 @@ export function MonthPicker({ value, onChange, max = monthKey(), min = '2000-01'
             }}
           />
           <div className="cal-foot">
-            <button type="button" className="link-btn" disabled={monthKey() > max} onClick={() => { onChange(monthKey() > max ? max : monthKey()); setOpen(false); button.current?.focus(); }}>This month</button>
+            <button type="button" className="link-btn" disabled={monthKey() > max} onClick={() => { onChange(monthKey() > max ? max : monthKey()); setOpen(false); button.current?.focus(); }}>{t('This month')}</button>
           </div>
         </div>
       </Popover>

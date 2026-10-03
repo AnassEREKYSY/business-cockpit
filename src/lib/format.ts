@@ -1,4 +1,6 @@
-import { LOCALE } from './constants';
+import { getLang, locale } from './i18n';
+
+const FR_SHORT = ['janv', 'févr', 'mars', 'avr', 'mai', 'juin', 'juil', 'août', 'sept', 'oct', 'nov', 'déc'];
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -26,20 +28,22 @@ export function fmtDate(d: string, short = false): string {
 
 export function fmtMonth(key: string, withYear = false): string {
   const dt = new Date(key + '-15T00:00:00');
+  if (withYear) return dt.toLocaleDateString(locale(), { month: 'long', year: 'numeric' });
+  if (getLang() === 'fr') return FR_SHORT[dt.getMonth()];
   // Short names cut to 3 letters: en-GB writes "Sept" but "Jun", which looks uneven side by side.
-  return withYear ? dt.toLocaleDateString(LOCALE, { month: 'long', year: 'numeric' }) : dt.toLocaleDateString(LOCALE, { month: 'short' }).slice(0, 3);
+  return dt.toLocaleDateString(locale(), { month: 'short' }).slice(0, 3);
 }
 
 export function money(n: number, currency: string): string {
   try {
-    return new Intl.NumberFormat(LOCALE, { style: 'currency', currency: currency || 'EUR', maximumFractionDigits: 0 }).format(n);
+    return new Intl.NumberFormat(locale(), { style: 'currency', currency: currency || 'EUR', maximumFractionDigits: 0 }).format(n);
   } catch {
     return Math.round(n) + ' ' + currency;
   }
 }
 
 export function pct(n: number): string {
-  return (Number.isFinite(n) ? Math.round(n * 10) / 10 : 0).toLocaleString(LOCALE) + '%';
+  return (Number.isFinite(n) ? Math.round(n * 10) / 10 : 0).toLocaleString(locale()) + '%';
 }
 
 export function initials(name: string): string {
