@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AppData, Asset, AssetPrice, CheckItem, Client, Contact, Entry, Investment, Note, Priority, Property, PropertyEntry, Recurring, SubCycle, Subscription, Task, TaxPayment, TaxSettings, TimeEntry, Trade } from '../types';
+import type { AppData, Asset, AssetPrice, CheckItem, Client, Contact, Entry, Investment, Note, Priority, Property, PropertyEntry, Recurring, SubCycle, Subscription, Task, TaxItem, TaxPayment, TaxSource, TaxSettings, TimeEntry, Trade } from '../types';
 import { DEFAULT_TAX } from './tax';
 import { periodRows } from './urssaf';
 import { isHex, nextColor } from './colors';
@@ -83,6 +83,7 @@ export function emptyData(): AppData {
     propertyEntries: [],
     subscriptions: [],
     taxPayments: [],
+    taxItems: [],
   };
 }
 
@@ -269,6 +270,17 @@ export function normalize(d: Partial<AppData>): AppData {
         paidOn: day(x.paidOn), notes: text(x.notes),
       }))
       .sort((a, b) => a.periodEnd.localeCompare(b.periodEnd) || a.id.localeCompare(b.id)),
+    taxItems: (d.taxItems ?? [])
+      .filter((x) => x && text(x.name).trim() && Number.isInteger(Number(x.year)))
+      .map((x): TaxItem => ({
+        id: idOf(x.id), scope: x.scope === 'business' ? 'business' : 'personal', year: Number(x.year), name: text(x.name).trim(),
+        source: TAX_SOURCES.includes(x.source) ? x.source : 'manual',
+        base: x.base === null || x.base === undefined || (x.base as unknown) === '' || !Number.isFinite(Number(x.base)) ? null : Number(x.base),
+        rate: rate(x.rate, 0), withheld: amount(x.withheld),
+        dueAmount: x.dueAmount === null || x.dueAmount === undefined || !Number.isFinite(Number(x.dueAmount)) ? null : amount(x.dueAmount),
+        dueDate: day(x.dueDate), paid: amount(x.paid), paidOn: day(x.paidOn), notes: text(x.notes),
+      }))
+      .sort((a, b) => b.year - a.year || a.name.localeCompare(b.name) || a.id.localeCompare(b.id)),
   };
 }
 
@@ -315,6 +327,7 @@ function normWealth(d: Partial<AppData>): Pick<AppData, 'assets' | 'trades' | 'a
   return { assets, trades, assetPrices, properties, propertyEntries };
 }
 
+const TAX_SOURCES: TaxSource[] = ['manual', 'tr', 'ma', 'other', 'stake', 'estate'];
 const SUB_CYCLES: SubCycle[] = ['weekly', 'monthly', 'quarterly', 'yearly'];
 function normSubs(list: Subscription[]): Subscription[] {
   return list
@@ -340,6 +353,18 @@ function normTime(list: TimeEntry[], pid: (v: unknown) => string, taskIds: Set<s
       note: text(x.note), startedAt: isoTime(x.startedAt),
     }))
     .sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
+}
+
+/** Example tax items, for the demo. */
+function demoTaxItems(): TaxItem[] {
+  const y = new Date().getFullYear();
+  const base = { base: null, withheld: 0, dueAmount: null, paid: 0, paidOn: '', notes: '' };
+  return [
+    { ...base, id: uid(), scope: 'personal', year: y, name: 'Trade Republic · gains and dividends', source: 'tr', rate: 31.4, dueDate: `${y + 1}-09-15` },
+    { ...base, id: uid(), scope: 'personal', year: y, name: 'Bourse de Casablanca · gains and dividends', source: 'ma', rate: 31.4, dueDate: `${y + 1}-09-15` },
+    { ...base, id: uid(), scope: 'personal', year: y, name: 'Stake · rent in Dubai', source: 'stake', rate: 0, dueDate: '', notes: 'Check how foreign rent is taxed for you.' },
+    { ...base, id: uid(), scope: 'business', year: y + 1, name: 'CFE', source: 'manual', rate: 0, dueDate: `${y + 1}-12-15`, notes: 'No CFE the year the business starts.' },
+  ];
 }
 
 /** Example subscriptions, business and personal, for the demo. Prices are examples only. */
@@ -443,6 +468,7 @@ export function demoData(profile: AppData['profile']): AppData {
   const demo: AppData = {
     profile,
     taxPayments: [],
+    taxItems: demoTaxItems(),
     clients: [
       { id: c2, name: 'Northside Studio', color: '#8b6fe8', notes: '', contacts: [] },
       { id: c3, name: 'Physio Plus', color: '#22a6c9', notes: '', contacts: [] },

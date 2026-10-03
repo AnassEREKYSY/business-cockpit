@@ -2,14 +2,19 @@ import { useState } from 'react';
 import { DatePicker } from '../components/Calendar';
 import { TaxCard } from '../components/TaxCard';
 import { useToast } from '../components/Toast';
-import { Field, IconPencil, Modal } from '../components/ui';
+import { Field, IconPencil, IconPlus, IconTrash, Modal, Seg } from '../components/ui';
+import { Select } from '../components/Select';
+import { useConfirm } from '../components/Confirm';
 import { parseAmount } from '../lib/finance';
 import { fmtDate, fmtMonth, isoDate, pct, uid } from '../lib/format';
 import { locale, t, tn } from '../lib/i18n';
 import { rateOn } from '../lib/tax';
 import { periodRows, type PeriodRow } from '../lib/urssaf';
+import { useQuotes } from '../lib/quotes';
+import { fxRates, type Fx } from '../lib/wealth';
+import { SOURCES, TAX_TEMPLATES, autoBase, figures, isAuto, sourceLabel } from '../lib/taxItems';
 import { removeRow } from '../lib/undo';
-import type { AppData, TaxPayment } from '../types';
+import type { AppData, TaxItem, TaxPayment } from '../types';
 
 type Update = (fn: (d: AppData) => AppData) => void;
 
@@ -33,7 +38,53 @@ function periodLabel(p: { start: string; end: string }) {
   return `${from} – ${fmtMonth(em)} ${y}`;
 }
 
+const TAB_KEY = 'cockpit.taxesTab';
+const FX_SYMBOLS = ['EURUSD=X', 'EURMAD=X', 'EURAED=X'];
+
 export default function TaxesPage({ data, update }: { data: AppData; update: Update }) {
+  const [tab, setTabState] = useState<'business' | 'personal'>(() => {
+    try {
+      return localStorage.getItem(TAB_KEY) === 'personal' ? 'personal' : 'business';
+    } catch {
+      return 'business';
+    }
+  });
+  const setTab = (next: 'business' | 'personal') => {
+    setTabState(next);
+    try {
+      localStorage.setItem(TAB_KEY, next);
+    } catch {
+      /* not remembered */
+    }
+  };
+  const feed = useQuotes(FX_SYMBOLS, '1mo');
+  const fx = fxRates(data, feed.quotes);
+  return (
+    <section className="section loose">
+      <div className="head">
+        <div className="head-title">
+          <h1>{t('Taxes')}</h1>
+          <span className="sub">{tab === 'business' ? t('URSSAF and other business taxes') : t('Taxes on your investments, rents and other personal income')}</span>
+        </div>
+        {tab === 'business' && <a className="btn sm outline" href="https://autoentrepreneur.urssaf.fr" target="_blank" rel="noreferrer">{t('Open URSSAF website')}</a>}
+        {tab === 'personal' && <a className="btn sm outline" href="https://www.impots.gouv.fr" target="_blank" rel="noreferrer">{t('Open impots.gouv.fr')}</a>}
+      </div>
+      <Seg label={t('Section')} value={tab} onChange={setTab} options={[['business', t('Business · URSSAF')], ['personal', t('Personal')]]} />
+      <div className="page-tab section loose" key={tab}>
+        {tab === 'business' ? (
+          <>
+            <UrssafSection data={data} update={update} />
+            <TaxItems scope="business" data={data} update={update} fx={fx} />
+          </>
+        ) : (
+          <TaxItems scope="personal" data={data} update={update} fx={fx} />
+        )}
+      </div>
+    </section>
+  );
+}
+
+function UrssafSection({ data, update }: { data: AppData; update: Update }) {
   const cur = data.profile.currency || 'EUR';
   const m = (n: number) => eur(n, cur);
   const today = isoDate();
@@ -54,14 +105,8 @@ export default function TaxesPage({ data, update }: { data: AppData; update: Upd
   const shown = showAll ? [...rows].reverse() : [...rows].reverse().slice(0, 6);
 
   return (
-    <section className="section loose">
-      <div className="head">
-        <div className="head-title">
-          <h1>{t('Taxes')}</h1>
-          <span className="sub">{tax.period === 'month' ? t('URSSAF micro-entreprise, declared and paid every month') : t('URSSAF micro-entreprise, declared and paid every 3 months')}</span>
-        </div>
-        <a className="btn sm outline" href="https://autoentrepreneur.urssaf.fr" target="_blank" rel="noreferrer">{t('Open URSSAF website')}</a>
-      </div>
+    <>
+      <div className="small">{tax.period === 'month' ? t('URSSAF micro-entreprise, declared and paid every month') : t('URSSAF micro-entreprise, declared and paid every 3 months')}</div>
 
       {late.length > 0 && (
         <div className="banner">
@@ -146,7 +191,7 @@ export default function TaxesPage({ data, update }: { data: AppData; update: Upd
       <TaxCard tax={tax} currency={cur} data={data} onChange={(next) => update((d) => ({ ...d, profile: { ...d.profile, tax: next } }))} />
 
       {editing && <PaymentModal row={editing} data={data} update={update} cur={cur} onClose={() => setEditing(null)} />}
-    </section>
+    </>
   );
 }
 
@@ -230,6 +275,180 @@ function PaymentModal({ row, data, update, cur, onClose }: { row: PeriodRow; dat
           <div className="row" style={{ gap: '0.5rem' }}>
             <button className="btn sm ghost" type="button" onClick={onClose}>{t('Cancel')}</button>
             <button className="btn sm" type="submit" disabled={!ok}>{p ? t('Save') : t('Record payment')}</button>
+          </div>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/* ---------------- Other taxes: CFE, investments, rents… ---------------- */
+
+function TaxItems({ scope, data, update, fx }: { scope: TaxItem['scope']; data: AppData; update: Update; fx: Fx }) {
+  const cur = data.profile.currency || 'EUR';
+  const m = (n: number) => eur(n, cur);
+  const today = isoDate();
+  const thisYear = new Date().getFullYear();
+  const mine = data.taxItems.filter((x) => x.scope === scope);
+  const years = [...new Set([thisYear, ...mine.map((x) => x.year)])].sort((a, b) => b - a);
+  const [year, setYear] = useState(scope === 'personal' ? thisYear : 0);
+  const [editing, setEditing] = useState<TaxItem | null>(null);
+  const [adding, setAdding] = useState(false);
+  const toast = useToast();
+  const confirm = useConfirm();
+  const list = mine.filter((x) => !year || x.year === year).map((x) => ({ x, f: figures(data, x, cur, fx) }));
+  const sum = (k: 'due' | 'left') => list.reduce((a, r) => a + r.f[k], 0);
+  const paid = list.reduce((a, r) => a + r.x.paid, 0);
+  const next = list.filter((r) => r.f.left > 0 && r.x.dueDate).sort((a, b) => a.x.dueDate.localeCompare(b.x.dueDate))[0];
+
+  const fromTemplate = (tp: (typeof TAX_TEMPLATES)[number] | null): TaxItem => {
+    const y = year || thisYear;
+    return {
+      id: uid(), scope, year: y, name: tp ? tp.name : '', source: tp ? tp.source : 'manual', base: null, rate: tp ? tp.rate : 0, withheld: 0,
+      dueAmount: null, dueDate: tp ? tp.due(y) : '', paid: 0, paidOn: '', notes: tp ? tp.notes : '',
+    };
+  };
+  const remove = async (x: TaxItem) => {
+    if (!(await confirm({ title: t('Delete this tax?'), message: t('"{name}" will be deleted.', { name: x.name }), confirmLabel: t('Delete'), danger: true }))) return;
+    const { restore } = removeRow(data, 'taxItems', x.id);
+    update((d) => removeRow(d, 'taxItems', x.id).data);
+    toast(<>{t('Deleted:')} <b>{x.name}</b></>, { undo: () => update(restore) });
+  };
+  const templates = TAX_TEMPLATES.filter((tp) => tp.scope === scope);
+
+  return (
+    <div className="card" style={{ gap: '0.75rem' }}>
+      <div className="head">
+        <div>
+          <div className="card-title">{scope === 'business' ? t('Other business taxes') : t('Personal taxes')}</div>
+          <div className="small">{scope === 'business' ? t('CFE and anything else your business pays besides URSSAF.') : t('Investments in France and abroad, rents, income tax, property tax… Estimates come from your Wealth data.')}</div>
+        </div>
+        <div className="row" style={{ gap: '0.5rem' }}>
+          {scope === 'personal' && years.length > 1 && (
+            <Seg label={t('Tax year')} value={String(year)} onChange={(v) => setYear(Number(v))} options={years.map((y) => [String(y), String(y)] as [string, string])} />
+          )}
+          <button className="btn sm" onClick={() => setAdding(!adding)}><IconPlus size={12} /> {t('Add a tax')}</button>
+        </div>
+      </div>
+
+      {adding && (
+        <div className="tax-templates">
+          {templates.map((tp) => (
+            <button key={tp.name} className="sub-preset" onClick={() => { setAdding(false); setEditing(fromTemplate(tp)); }}>{t(tp.name)}</button>
+          ))}
+          <button className="sub-preset" onClick={() => { setAdding(false); setEditing(fromTemplate(null)); }}><IconPlus size={11} /> {t('Something else')}</button>
+        </div>
+      )}
+
+      {scope === 'personal' && list.length > 0 && (
+        <div className="tax-est">
+          <div><span className="small">{t('Due for {year}', { year: year || thisYear })}</span><b>{m(sum('due'))}</b></div>
+          <div><span className="small">{t('Paid')}</span><b>{m(paid)}</b></div>
+          <div><span className="small">{next ? t('Next: {name}', { name: next.x.name }) : t('Left to pay')}</span><b>{next ? `${m(next.f.left)} · ${fmtDate(next.x.dueDate, true)}` : m(sum('left'))}</b></div>
+        </div>
+      )}
+
+      <div className="table-wrap">
+        {list.length > 0 && (
+          <div className="trow th t-item">
+            <span>{t('Tax')}</span><span className="r">{t('Taxable')}</span><span className="r">{t('Rate')}</span><span className="r">{t('Amount due')}</span>
+            <span className="r">{t('Paid')}</span><span>{t('Status')}</span><span />
+          </div>
+        )}
+        {list.map(({ x, f }) => {
+          const late = f.left > 0 && x.dueDate && x.dueDate < today;
+          const chip = f.due === 0 && !x.paid ? (!x.rate && f.base > 0 && !f.fromNotice ? <span className="pay-chip waiting">{t('To check')}</span> : <span className="pay-chip">{t('Nothing due')}</span>)
+            : f.left <= 0 ? <span className="pay-chip paid">{t('Paid')}</span>
+              : late ? <span className="pay-chip late">{t('Late')}</span>
+                : x.paid > 0 ? <span className="pay-chip waiting">{t('Partly paid')}</span>
+                  : x.dueDate ? <span className="pay-chip waiting">{t('Due {date}', { date: fmtDate(x.dueDate, x.dueDate.slice(0, 4) === today.slice(0, 4)) })}</span>
+                    : <span className="pay-chip">{t('To check')}</span>;
+          return (
+            <div key={x.id} role="button" tabIndex={0} className="trow t-item t-click" onClick={(e) => !(e.target as HTMLElement).closest('.icon-btn') && setEditing(x)} onKeyDown={(e) => e.target === e.currentTarget && e.key === 'Enter' && setEditing(x)}>
+              <span>
+                <b className="ellipsis" style={{ display: 'block' }}>{t(x.name)}</b>
+                <span className="small">{[scope === 'business' || !year ? String(x.year) : '', t(sourceLabel(x.source)), x.withheld ? t('{amount} withheld', { amount: m(x.withheld) }) : ''].filter(Boolean).join(' · ')}</span>
+              </span>
+              <span className="r" style={{ color: f.base < 0 ? 'var(--red)' : undefined }}>{x.source === 'manual' && x.base === null ? '—' : m(f.base)}{f.base < 0 && <span className="small" style={{ display: 'block' }}>{t('loss')}</span>}</span>
+              <span className="r">{x.rate ? pct(x.rate) : '—'}</span>
+              <span className="r"><b>{m(f.due)}</b>{f.fromNotice && <span className="small" style={{ display: 'block' }}>{t('from notice')}</span>}</span>
+              <span className="r">{x.paid ? m(x.paid) : '—'}</span>
+              <span>{chip}</span>
+              <span className="row-actions"><button className="icon-btn danger" onClick={() => void remove(x)} aria-label={t('Delete {name}', { name: x.name })}><IconTrash size={13} /></button></span>
+            </div>
+          );
+        })}
+        {list.length === 0 && (
+          <div className="empty">
+            {scope === 'business' ? t('Nothing yet. Add the CFE when you get its notice (none the year the business starts).') : t('Nothing for {year} yet. Add Trade Republic, Bourse de Casablanca or Stake: the taxable amount is worked out from your Wealth data.', { year: year || thisYear })}
+          </div>
+        )}
+      </div>
+      {scope === 'personal' && <div className="small">{t('Estimates only, to plan ahead: check each rate for your own situation (tax treaties, option for the progressive scale, losses carried forward).')}</div>}
+      {editing && <TaxItemModal item={editing} data={data} update={update} fx={fx} onClose={() => setEditing(null)} />}
+    </div>
+  );
+}
+
+function TaxItemModal({ item, data, update, fx, onClose }: { item: TaxItem; data: AppData; update: Update; fx: Fx; onClose: () => void }) {
+  const creating = !data.taxItems.some((x) => x.id === item.id);
+  const cur = data.profile.currency || 'EUR';
+  const m = (n: number) => eur(n, cur);
+  const [f, setF] = useState(item);
+  const str = (n: number | null) => (n === null || n === 0 ? '' : String(n));
+  const [v, setV] = useState({ base: str(item.base), rate: item.rate ? String(item.rate) : '', withheld: str(item.withheld), due: str(item.dueAmount), paid: str(item.paid) });
+  const toast = useToast();
+  const num = (s: string) => (s.trim() ? parseAmount(s) : null);
+  const rateN = v.rate.trim() ? Number(v.rate.replace(',', '.')) : 0;
+  const parsed = { base: num(v.base), withheld: num(v.withheld) ?? 0, due: num(v.due), paid: num(v.paid) ?? 0 };
+  const bad = (v.base.trim() && parsed.base === null) || (v.withheld.trim() && num(v.withheld) === null) || (v.due.trim() && parsed.due === null) || (v.paid.trim() && num(v.paid) === null) || !Number.isFinite(rateN) || rateN < 0 || rateN > 100;
+  const auto = isAuto(f.source) ? autoBase(data, f.source, f.year, cur, fx) : null;
+  const draft: TaxItem = { ...f, base: parsed.base, rate: rateN, withheld: parsed.withheld, dueAmount: parsed.due, paid: parsed.paid };
+  const fig = figures(data, draft, cur, fx);
+  const ok = !!f.name.trim() && !bad && Number.isInteger(f.year);
+
+  const save = () => {
+    if (!ok) return;
+    const next = { ...draft, name: f.name.trim() };
+    update((d) => ({ ...d, taxItems: creating ? [...d.taxItems, next] : d.taxItems.map((x) => (x.id === next.id ? next : x)) }));
+    toast(<>{creating ? t('Added:') : t('Saved:')} <b>{next.name}</b></>, { tone: 'success' });
+    onClose();
+  };
+  const years = Array.from({ length: 6 }, (_, i) => new Date().getFullYear() + 1 - i);
+
+  return (
+    <Modal title={creating ? t('New tax') : t(item.name)} onClose={onClose}>
+      <form className="section" onSubmit={(e) => { e.preventDefault(); save(); }}>
+        <div className="form-grid">
+          <Field label={t('Name')}><input className="input" autoFocus={creating && !f.name} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder={t('Income tax')} /></Field>
+          <Field label={t('Tax year')}><Select value={String(f.year)} onChange={(y) => setF({ ...f, year: Number(y) })} options={years.map((y) => ({ value: String(y), label: String(y) }))} ariaLabel={t('Tax year')} /></Field>
+          <Field label={t('Taxable amount from')}>
+            <Select value={f.source} onChange={(source) => setF({ ...f, source })} options={SOURCES.filter((s) => f.scope === 'personal' || s.key === 'manual').map((s) => ({ value: s.key, label: t(s.label), hint: undefined }))} ariaLabel={t('Taxable amount from')} />
+          </Field>
+          <Field label={t('Taxable amount ({currency})', { currency: cur })}>
+            <input className="input" inputMode="decimal" value={v.base} onChange={(e) => setV({ ...v, base: e.target.value })} placeholder={auto !== null ? t('Auto: {amount}', { amount: m(auto) }) : '0'} />
+          </Field>
+          <Field label={t('Rate (%)')}><input className="input" inputMode="decimal" value={v.rate} onChange={(e) => setV({ ...v, rate: e.target.value })} placeholder="31.4" /></Field>
+          <Field label={t('Already withheld or paid abroad')}><input className="input" inputMode="decimal" value={v.withheld} onChange={(e) => setV({ ...v, withheld: e.target.value })} placeholder="0" /></Field>
+          <Field label={t('Amount due, from the tax notice (optional)')}><input className="input" inputMode="decimal" value={v.due} onChange={(e) => setV({ ...v, due: e.target.value })} placeholder={t('Estimate: {amount}', { amount: m(fig.estimate) })} /></Field>
+          <Field label={t('Due date')}><DatePicker value={f.dueDate} onChange={(dueDate) => setF({ ...f, dueDate })} placeholder={t('Unknown')} ariaLabel={t('Due date')} /></Field>
+          <Field label={t('Amount paid ({currency})', { currency: cur })}><input className="input" inputMode="decimal" value={v.paid} onChange={(e) => setV({ ...v, paid: e.target.value })} placeholder="0" /></Field>
+          <Field label={t('Paid on')}><DatePicker value={f.paidOn} onChange={(paidOn) => setF({ ...f, paidOn })} placeholder={t('Date')} ariaLabel={t('Paid on')} /></Field>
+        </div>
+        <Field label={t('Notes')}><textarea className="input" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></Field>
+        {isAuto(f.source) && <div className="small">{t(SOURCES.find((s) => s.key === f.source)?.hint ?? '')} · {f.year}. {t('Leave the taxable amount empty to keep it automatic.')}</div>}
+        {bad && <div className="small form-error">{t('One of the amounts is not valid.')}</div>}
+        {ok && (
+          <div className="sub-preview small">
+            {fig.base < 0 ? t('Loss of {amount}: nothing to pay on it.', { amount: m(-fig.base) }) + ' ' : ''}
+            {t('Estimate {estimate} · due {due} · left to pay {left}', { estimate: m(fig.estimate), due: m(fig.due), left: m(fig.left) })}
+          </div>
+        )}
+        <div className="modal-foot">
+          <span />
+          <div className="row" style={{ gap: '0.5rem' }}>
+            <button className="btn sm ghost" type="button" onClick={onClose}>{t('Cancel')}</button>
+            <button className="btn sm" type="submit" disabled={!ok}>{creating ? t('Add') : t('Save')}</button>
           </div>
         </div>
       </form>

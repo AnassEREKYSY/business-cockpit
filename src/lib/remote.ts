@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { AppData, Asset, AssetPrice, Client, Entry, Investment, Note, Project, Property, PropertyEntry, Recurring, Subscription, TaxPayment, Task, TimeEntry, Trade } from '../types';
+import type { AppData, Asset, AssetPrice, Client, Entry, Investment, Note, Project, Property, PropertyEntry, Recurring, Subscription, TaxItem, TaxPayment, Task, TimeEntry, Trade } from '../types';
 import { normalize, type Repository } from './store';
 
 /*
@@ -20,8 +20,8 @@ const UNKNOWN = Symbol('unknown'); // the request carrying this row failed: stat
 
 type Row = Record<string, unknown>;
 type Known = Row | typeof UNKNOWN;
-type ListTable = 'clients' | 'projects' | 'recurring' | 'entries' | 'tasks' | 'notes' | 'investments' | 'time_entries' | 'assets' | 'trades' | 'asset_prices' | 'properties' | 'property_entries' | 'subscriptions' | 'tax_payments';
-const LIST_TABLES: ListTable[] = ['clients', 'projects', 'recurring', 'entries', 'tasks', 'notes', 'investments', 'time_entries', 'assets', 'trades', 'asset_prices', 'properties', 'property_entries', 'subscriptions', 'tax_payments'];
+type ListTable = 'clients' | 'projects' | 'recurring' | 'entries' | 'tasks' | 'notes' | 'investments' | 'time_entries' | 'assets' | 'trades' | 'asset_prices' | 'properties' | 'property_entries' | 'subscriptions' | 'tax_payments' | 'tax_items';
+const LIST_TABLES: ListTable[] = ['clients', 'projects', 'recurring', 'entries', 'tasks', 'notes', 'investments', 'time_entries', 'assets', 'trades', 'asset_prices', 'properties', 'property_entries', 'subscriptions', 'tax_payments', 'tax_items'];
 type Rows = { profile: Row } & Record<ListTable, Row[]>;
 const emptyTables = () => Object.fromEntries(LIST_TABLES.map((t) => [t, new Map<string, Known>()])) as Record<ListTable, Map<string, Known>>;
 type Stale = { projects: string[]; clients: string[]; assets?: string[]; properties?: string[] };
@@ -116,6 +116,10 @@ export function toRows(d: AppData, userId: string): Rows {
     tax_payments: d.taxPayments.map((x: TaxPayment) => ({
       id: x.id, period_start: x.periodStart, period_end: x.periodEnd, revenue: x.revenue, amount: x.amount, paid_on: orNull(x.paidOn), notes: x.notes,
     })),
+    tax_items: d.taxItems.map((x: TaxItem) => ({
+      id: x.id, scope: x.scope, year: x.year, name: x.name, source: x.source, base: x.base, rate: x.rate, withheld: x.withheld,
+      due_amount: x.dueAmount, due_date: orNull(x.dueDate), paid: x.paid, paid_on: orNull(x.paidOn), notes: x.notes,
+    })),
     time_entries: d.timeEntries.map((x: TimeEntry) => ({
       id: x.id, project_id: pid(x.projectId), task_id: orNull(x.taskId), date: x.date, minutes: x.minutes, note: x.note,
       started_at: orNull(x.startedAt),
@@ -199,6 +203,11 @@ export function fromRows(r: { profile: Row | null } & Record<ListTable, Row[]>):
       amount: Number(x.amount ?? 0), currency: str(x.currency), cycle: str(x.cycle) as Subscription['cycle'], start: str(x.start), end: str(x.end),
       payment: str(x.payment), notes: str(x.notes), color: str(x.color), position: Number(x.position ?? 0),
     })),
+    taxItems: r.tax_items.map((x) => ({
+      id: str(x.id), scope: (str(x.scope) === 'business' ? 'business' : 'personal') as TaxItem['scope'], year: Number(x.year), name: str(x.name),
+      source: str(x.source) as TaxItem['source'], base: x.base == null ? null : Number(x.base), rate: Number(x.rate ?? 0), withheld: Number(x.withheld ?? 0),
+      dueAmount: x.due_amount == null ? null : Number(x.due_amount), dueDate: str(x.due_date), paid: Number(x.paid ?? 0), paidOn: str(x.paid_on), notes: str(x.notes),
+    })),
     taxPayments: r.tax_payments.map((x) => ({
       id: str(x.id), periodStart: str(x.period_start), periodEnd: str(x.period_end), revenue: Number(x.revenue ?? 0), amount: Number(x.amount ?? 0),
       paidOn: str(x.paid_on), notes: str(x.notes),
@@ -228,7 +237,7 @@ export function createSupabaseRepository(db: SupabaseClient, userId: string): Re
     const ORDER: Record<ListTable, string> = {
       clients: 'name', projects: 'position', tasks: 'position', entries: 'date', recurring: 'created_at', notes: 'created_at',
       investments: 'date', time_entries: 'date', assets: 'position', trades: 'date', asset_prices: 'date', properties: 'position',
-      property_entries: 'date', subscriptions: 'position', tax_payments: 'period_end',
+      property_entries: 'date', subscriptions: 'position', tax_payments: 'period_end', tax_items: 'year',
     };
     const [profile, ...lists] = await Promise.all([
       db.from('profiles').select('*').eq('user_id', userId).maybeSingle(),
@@ -344,12 +353,12 @@ export function createSupabaseRepository(db: SupabaseClient, userId: string): Re
     }
 
     const ok =
-      (await run([...profileJobs, ...tableJobs('clients'), ...tableJobs('assets'), ...tableJobs('properties'), ...tableJobs('subscriptions'), ...tableJobs('tax_payments')])) &&
+      (await run([...profileJobs, ...tableJobs('clients'), ...tableJobs('assets'), ...tableJobs('properties'), ...tableJobs('subscriptions'), ...tableJobs('tax_payments'), ...tableJobs('tax_items')])) &&
       (await run(tableJobs('projects'))) &&
       (await run([...tableJobs('recurring'), ...tableJobs('entries'), ...tableJobs('tasks'), ...tableJobs('notes'), ...tableJobs('investments'), ...tableJobs('time_entries'), ...tableJobs('trades'), ...tableJobs('asset_prices'), ...tableJobs('property_entries')])) &&
       (await run([...deleteJobs('tasks'), ...deleteJobs('entries'), ...deleteJobs('recurring'), ...deleteJobs('notes'), ...deleteJobs('investments'), ...deleteJobs('time_entries'), ...deleteJobs('trades'), ...deleteJobs('asset_prices'), ...deleteJobs('property_entries')])) &&
       (await run(deleteJobs('projects'))) &&
-      (await run([...deleteJobs('clients'), ...deleteJobs('assets'), ...deleteJobs('properties'), ...deleteJobs('subscriptions'), ...deleteJobs('tax_payments')]));
+      (await run([...deleteJobs('clients'), ...deleteJobs('assets'), ...deleteJobs('properties'), ...deleteJobs('subscriptions'), ...deleteJobs('tax_payments'), ...deleteJobs('tax_items')]));
     if (ok) return;
 
     const err = failure as DbError | null;

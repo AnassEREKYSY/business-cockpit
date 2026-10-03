@@ -14,9 +14,9 @@ export const TAX_PRESETS: Record<Exclude<TaxActivity, 'custom'>, { label: string
   bic_sales: { label: 'BIC · sales of goods (vente)', social: 12.3, acre: 6.2, cfp: 0.1, vl: 1.0 },
 };
 
-/** Started in April 2026 with ACRE (50 %, to 31 March 2027) and the versement libératoire. */
+/** BNC (profession libérale non réglementée), started in April 2026 with ACRE (50 %, to 31 March 2027) and the versement libératoire. */
 export const DEFAULT_TAX: TaxSettings = {
-  activity: 'bic_services', start: '2026-04-01', acreUntil: '2027-03-31', ...pick(TAX_PRESETS.bic_services), period: 'quarter', firstEnd: '',
+  activity: 'bnc', start: '2026-04-01', acreUntil: '2027-03-31', ...pick(TAX_PRESETS.bnc), period: 'quarter', firstEnd: '',
 };
 
 function pick(p: { social: number; acre: number; cfp: number; vl: number }) {

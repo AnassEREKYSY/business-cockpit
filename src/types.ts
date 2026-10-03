@@ -50,6 +50,31 @@ export interface TaxSettings {
   firstEnd: string;
 }
 
+/** Where the taxable amount of a tax item comes from: typed by hand, or worked out from Wealth. */
+export type TaxSource = 'manual' | 'tr' | 'ma' | 'other' | 'stake' | 'estate';
+
+/** Any other tax to keep an eye on: CFE (business), or personal ones (investments, rents, property tax…). */
+export interface TaxItem {
+  id: string;
+  scope: 'business' | 'personal';
+  /** Tax year the income belongs to. */
+  year: number;
+  name: string;
+  source: TaxSource;
+  /** Taxable amount typed by hand (null = worked out from the source). */
+  base: number | null;
+  /** Rate in % applied to the taxable amount. */
+  rate: number;
+  /** Tax already paid abroad or withheld at source, taken off the estimate. */
+  withheld: number;
+  /** Amount due typed by hand, e.g. from the tax notice (null = estimate). */
+  dueAmount: number | null;
+  dueDate: string;
+  paid: number;
+  paidOn: string;
+  notes: string;
+}
+
 /** What was declared and paid to URSSAF for one period. */
 export interface TaxPayment {
   id: string;
@@ -242,6 +267,7 @@ export interface AppData {
   properties: Property[];
   subscriptions: Subscription[];
   taxPayments: TaxPayment[];
+  taxItems: TaxItem[];
   propertyEntries: PropertyEntry[];
 }
 

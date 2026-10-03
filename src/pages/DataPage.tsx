@@ -178,7 +178,7 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
     const before = data;
     update((d) => ({
       ...d, clients: [], projects: [], tasks: [], entries: [], recurring: [], notes: [], investments: [], timeEntries: [],
-      assets: [], trades: [], assetPrices: [], properties: [], propertyEntries: [], subscriptions: [], taxPayments: [],
+      assets: [], trades: [], assetPrices: [], properties: [], propertyEntries: [], subscriptions: [], taxPayments: [], taxItems: [],
     }));
     toast(t('Everything cleared'), { undo: () => update(() => before) });
   };
