@@ -6,7 +6,7 @@ import type { AppData } from '../types';
  * meanwhile are kept).
  */
 
-type Rows = 'clients' | 'projects' | 'tasks' | 'entries' | 'recurring' | 'notes' | 'timeEntries' | 'assets' | 'trades' | 'assetPrices' | 'properties' | 'propertyEntries';
+type Rows = 'clients' | 'projects' | 'tasks' | 'entries' | 'recurring' | 'notes' | 'timeEntries' | 'assets' | 'trades' | 'assetPrices' | 'properties' | 'propertyEntries' | 'subscriptions';
 type Restore = (d: AppData) => AppData;
 
 /** Add rows back, skipping ids that exist again. */

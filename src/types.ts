@@ -186,6 +186,29 @@ export interface Recurring {
   clientId: string;
 }
 
+export type SubCycle = 'weekly' | 'monthly' | 'quarterly' | 'yearly';
+export type SubScope = 'business' | 'personal';
+
+/** Something paid again and again (ChatGPT, OVH, Netflix, Amazon Prime…). A tracker only: not in Finances. */
+export interface Subscription {
+  id: string;
+  name: string;
+  category: string;
+  scope: SubScope;
+  amount: number;
+  currency: string;
+  cycle: SubCycle;
+  /** First payment date: later payments follow the cycle from it. */
+  start: string;
+  /** Cancelled on (last payment on or before it). Empty while active. */
+  end: string;
+  /** Card, PayPal, Apple… */
+  payment: string;
+  notes: string;
+  color: string;
+  position: number;
+}
+
 export interface AppData {
   profile: Profile;
   clients: Client[];
@@ -200,6 +223,7 @@ export interface AppData {
   trades: Trade[];
   assetPrices: AssetPrice[];
   properties: Property[];
+  subscriptions: Subscription[];
   propertyEntries: PropertyEntry[];
 }
 

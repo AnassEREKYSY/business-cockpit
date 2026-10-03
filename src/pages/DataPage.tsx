@@ -171,13 +171,16 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
   const clearAll = async () => {
     const ok = await confirm({
       title: t('Clear everything?'),
-      message: t('Clients, projects (with their briefs and journals), tasks, transactions, subscriptions and tracked time will be deleted. Your profile is kept.'),
+      message: t('Clients, projects (with their briefs and journals), tasks, transactions, recurring costs, tracked time, subscriptions, investments and real estate will be deleted. Your profile is kept.'),
       confirmLabel: t('Clear everything'),
       danger: true,
     });
     if (!ok) return;
     const before = data;
-    update((d) => ({ ...d, clients: [], projects: [], tasks: [], entries: [], recurring: [], notes: [], investments: [], timeEntries: [] }));
+    update((d) => ({
+      ...d, clients: [], projects: [], tasks: [], entries: [], recurring: [], notes: [], investments: [], timeEntries: [],
+      assets: [], trades: [], assetPrices: [], properties: [], propertyEntries: [], subscriptions: [],
+    }));
     toast(t('Everything cleared'), { undo: () => update(() => before) });
   };
 
@@ -268,7 +271,7 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
       <div className="card" style={{ gap: '0.875rem' }}>
         <div className="head">
           <div>
-            <div className="card-title">{t('Subscriptions & recurring')} <span className="small" style={{ fontWeight: 500 }}>{data.recurring.length}</span></div>
+            <div className="card-title">{t('Recurring business income & costs')} <span className="small" style={{ fontWeight: 500 }}>{data.recurring.length}</span></div>
             <div className="small">{t('Software, fixed subcontracting, rent, client retainers. Enter them once, they are counted automatically every month.')}</div>
           </div>
           {burn > 0 && <div className="pill" style={{ ...soft('#f59e0b'), fontSize: '0.75rem' }}>{t('{amount} / month in fixed costs', { amount: m(burn) })}</div>}

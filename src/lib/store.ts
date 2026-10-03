@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AppData, Asset, AssetPrice, CheckItem, Client, Contact, Entry, Investment, Note, Priority, Property, PropertyEntry, Recurring, Task, TaxSettings, TimeEntry, Trade } from '../types';
+import type { AppData, Asset, AssetPrice, CheckItem, Client, Contact, Entry, Investment, Note, Priority, Property, PropertyEntry, Recurring, SubCycle, Subscription, Task, TaxSettings, TimeEntry, Trade } from '../types';
 import { DEFAULT_TAX } from './tax';
 import { isHex, nextColor } from './colors';
 import { COLUMNS, LOCALE, NOTE_KINDS, PROJECT_STATUSES, catLabel } from './constants';
@@ -80,6 +80,7 @@ export function emptyData(): AppData {
     assetPrices: [],
     properties: [],
     propertyEntries: [],
+    subscriptions: [],
   };
 }
 
@@ -257,6 +258,7 @@ export function normalize(d: Partial<AppData>): AppData {
       .sort((a, b) => a.date.localeCompare(b.date)),
     timeEntries: normTime(d.timeEntries ?? [], pid, new Set((d.tasks ?? []).map((t) => t.id))),
     ...normWealth(d),
+    subscriptions: normSubs(d.subscriptions ?? []),
   };
 }
 
@@ -303,6 +305,21 @@ function normWealth(d: Partial<AppData>): Pick<AppData, 'assets' | 'trades' | 'a
   return { assets, trades, assetPrices, properties, propertyEntries };
 }
 
+const SUB_CYCLES: SubCycle[] = ['weekly', 'monthly', 'quarterly', 'yearly'];
+function normSubs(list: Subscription[]): Subscription[] {
+  return list
+    .filter((x) => x && text(x.name).trim() && isDay(x.start))
+    .map((x, i): Subscription => ({
+      id: idOf(x.id), name: text(x.name).trim(), category: text(x.category) || 'Other',
+      scope: x.scope === 'business' ? 'business' : 'personal', amount: amount(x.amount),
+      currency: CURRENCY.test(text(x.currency)) ? text(x.currency) : 'EUR',
+      cycle: SUB_CYCLES.includes(x.cycle) ? x.cycle : 'monthly', start: x.start, end: day(x.end),
+      payment: text(x.payment).trim(), notes: text(x.notes), color: text(x.color),
+      position: Number.isFinite(Number(x.position)) && x.position !== null ? Number(x.position) : i,
+    }))
+    .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));
+}
+
 function normTime(list: TimeEntry[], pid: (v: unknown) => string, taskIds: Set<string>): TimeEntry[] {
   return list
     .filter((x) => isDay(x.date))
@@ -313,6 +330,27 @@ function normTime(list: TimeEntry[], pid: (v: unknown) => string, taskIds: Set<s
       note: text(x.note), startedAt: isoTime(x.startedAt),
     }))
     .sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
+}
+
+/** Example subscriptions, business and personal, for the demo. Prices are examples only. */
+function demoSubs(m: (off: number, day: number) => string): Subscription[] {
+  const rows: [string, string, Subscription['scope'], number, string, SubCycle, string, string][] = [
+    ['ChatGPT Plus', 'AI tools', 'business', 20, 'USD', 'monthly', m(8, 4), '#10a37f'],
+    ['Claude Pro', 'AI tools', 'business', 20, 'USD', 'monthly', m(5, 12), '#d97757'],
+    ['OVH VPS', 'Hosting & domains', 'business', 7.2, 'EUR', 'monthly', m(14, 1), '#123f6d'],
+    ['Domain name', 'Hosting & domains', 'business', 12.99, 'EUR', 'yearly', m(10, 20), '#5b6b7a'],
+    ['GitHub Copilot', 'Software', 'business', 10, 'USD', 'monthly', m(3, 8), '#24292f'],
+    ['Amazon Prime', 'Shopping', 'personal', 6.99, 'EUR', 'monthly', m(20, 15), '#ff9900'],
+    ['Netflix', 'Streaming & music', 'personal', 13.49, 'EUR', 'monthly', m(30, 22), '#e50914'],
+    ['Spotify', 'Streaming & music', 'personal', 11.12, 'EUR', 'monthly', m(26, 2), '#1db954'],
+    ['Phone plan', 'Phone & internet', 'personal', 15.99, 'EUR', 'monthly', m(18, 6), '#7a5ea8'],
+    ['Gym', 'Sport & health', 'personal', 29.99, 'EUR', 'monthly', m(7, 1), '#c4626a'],
+  ];
+  const list = rows.map(([name, category, scope, amount, currency, cycle, start, color], i): Subscription => ({
+    id: uid(), name, category, scope, amount, currency, cycle, start, end: '', payment: i % 3 === 0 ? 'PayPal' : 'Card', notes: '', color, position: i,
+  }));
+  list.push({ id: uid(), name: 'Disney+', category: 'Streaming & music', scope: 'personal', amount: 8.99, currency: 'EUR', cycle: 'monthly', start: m(12, 9), end: m(4, 20), payment: 'Card', notes: 'Cancelled after the series ended.', color: '#113ccf', position: list.length });
+  return list;
 }
 
 /** Example portfolios and one rental, for the demo. */
@@ -421,6 +459,7 @@ export function demoData(profile: AppData['profile']): AppData {
       { id: uid(), projectId: p2, taskId: '', date: daysAgo(1), minutes: 50, note: 'Kick-off call', startedAt: '' },
     ],
     ...demoWealth(m),
+    subscriptions: demoSubs(m),
     entries,
     investments: [],
     notes: [

@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { AppData, Asset, AssetPrice, Client, Entry, Investment, Note, Project, Property, PropertyEntry, Recurring, Task, TimeEntry, Trade } from '../types';
+import type { AppData, Asset, AssetPrice, Client, Entry, Investment, Note, Project, Property, PropertyEntry, Recurring, Subscription, Task, TimeEntry, Trade } from '../types';
 import { normalize, type Repository } from './store';
 
 /*
@@ -20,8 +20,8 @@ const UNKNOWN = Symbol('unknown'); // the request carrying this row failed: stat
 
 type Row = Record<string, unknown>;
 type Known = Row | typeof UNKNOWN;
-type ListTable = 'clients' | 'projects' | 'recurring' | 'entries' | 'tasks' | 'notes' | 'investments' | 'time_entries' | 'assets' | 'trades' | 'asset_prices' | 'properties' | 'property_entries';
-const LIST_TABLES: ListTable[] = ['clients', 'projects', 'recurring', 'entries', 'tasks', 'notes', 'investments', 'time_entries', 'assets', 'trades', 'asset_prices', 'properties', 'property_entries'];
+type ListTable = 'clients' | 'projects' | 'recurring' | 'entries' | 'tasks' | 'notes' | 'investments' | 'time_entries' | 'assets' | 'trades' | 'asset_prices' | 'properties' | 'property_entries' | 'subscriptions';
+const LIST_TABLES: ListTable[] = ['clients', 'projects', 'recurring', 'entries', 'tasks', 'notes', 'investments', 'time_entries', 'assets', 'trades', 'asset_prices', 'properties', 'property_entries', 'subscriptions'];
 type Rows = { profile: Row } & Record<ListTable, Row[]>;
 const emptyTables = () => Object.fromEntries(LIST_TABLES.map((t) => [t, new Map<string, Known>()])) as Record<ListTable, Map<string, Known>>;
 type Stale = { projects: string[]; clients: string[]; assets?: string[]; properties?: string[] };
@@ -109,6 +109,10 @@ export function toRows(d: AppData, userId: string): Rows {
     property_entries: d.propertyEntries.filter((x) => hids.has(x.propertyId)).map((x: PropertyEntry) => ({
       id: x.id, property_id: x.propertyId, date: x.date, kind: x.kind, amount: x.amount, label: x.label,
     })),
+    subscriptions: d.subscriptions.map((x: Subscription) => ({
+      id: x.id, name: x.name, category: x.category, scope: x.scope, amount: x.amount, currency: x.currency, cycle: x.cycle,
+      start: x.start, end: orNull(x.end), payment: x.payment, notes: x.notes, color: x.color, position: x.position,
+    })),
     time_entries: d.timeEntries.map((x: TimeEntry) => ({
       id: x.id, project_id: pid(x.projectId), task_id: orNull(x.taskId), date: x.date, minutes: x.minutes, note: x.note,
       started_at: orNull(x.startedAt),
@@ -187,6 +191,11 @@ export function fromRows(r: { profile: Row | null } & Record<ListTable, Row[]>):
       purchasePrice: Number(x.purchase_price ?? 0), value: Number(x.value ?? 0), debt: Number(x.debt ?? 0), rent: Number(x.rent ?? 0),
       charges: Number(x.charges ?? 0), loan: Number(x.loan ?? 0), notes: str(x.notes), position: Number(x.position ?? 0),
     })),
+    subscriptions: r.subscriptions.map((x) => ({
+      id: str(x.id), name: str(x.name), category: str(x.category), scope: (str(x.scope) === 'business' ? 'business' : 'personal') as Subscription['scope'],
+      amount: Number(x.amount ?? 0), currency: str(x.currency), cycle: str(x.cycle) as Subscription['cycle'], start: str(x.start), end: str(x.end),
+      payment: str(x.payment), notes: str(x.notes), color: str(x.color), position: Number(x.position ?? 0),
+    })),
     propertyEntries: r.property_entries.map((x) => ({
       id: str(x.id), propertyId: str(x.property_id), date: str(x.date), kind: str(x.kind) as PropertyEntry['kind'],
       amount: Number(x.amount ?? 0), label: str(x.label),
@@ -212,7 +221,7 @@ export function createSupabaseRepository(db: SupabaseClient, userId: string): Re
     const ORDER: Record<ListTable, string> = {
       clients: 'name', projects: 'position', tasks: 'position', entries: 'date', recurring: 'created_at', notes: 'created_at',
       investments: 'date', time_entries: 'date', assets: 'position', trades: 'date', asset_prices: 'date', properties: 'position',
-      property_entries: 'date',
+      property_entries: 'date', subscriptions: 'position',
     };
     const [profile, ...lists] = await Promise.all([
       db.from('profiles').select('*').eq('user_id', userId).maybeSingle(),
@@ -328,12 +337,12 @@ export function createSupabaseRepository(db: SupabaseClient, userId: string): Re
     }
 
     const ok =
-      (await run([...profileJobs, ...tableJobs('clients'), ...tableJobs('assets'), ...tableJobs('properties')])) &&
+      (await run([...profileJobs, ...tableJobs('clients'), ...tableJobs('assets'), ...tableJobs('properties'), ...tableJobs('subscriptions')])) &&
       (await run(tableJobs('projects'))) &&
       (await run([...tableJobs('recurring'), ...tableJobs('entries'), ...tableJobs('tasks'), ...tableJobs('notes'), ...tableJobs('investments'), ...tableJobs('time_entries'), ...tableJobs('trades'), ...tableJobs('asset_prices'), ...tableJobs('property_entries')])) &&
       (await run([...deleteJobs('tasks'), ...deleteJobs('entries'), ...deleteJobs('recurring'), ...deleteJobs('notes'), ...deleteJobs('investments'), ...deleteJobs('time_entries'), ...deleteJobs('trades'), ...deleteJobs('asset_prices'), ...deleteJobs('property_entries')])) &&
       (await run(deleteJobs('projects'))) &&
-      (await run([...deleteJobs('clients'), ...deleteJobs('assets'), ...deleteJobs('properties')]));
+      (await run([...deleteJobs('clients'), ...deleteJobs('assets'), ...deleteJobs('properties'), ...deleteJobs('subscriptions')]));
     if (ok) return;
 
     const err = failure as DbError | null;

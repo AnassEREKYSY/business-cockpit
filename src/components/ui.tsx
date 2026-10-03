@@ -206,6 +206,15 @@ export const IconClients = () => (
     <path d="M16 4.5a3.5 3.5 0 0 1 0 7M18.5 14a6.5 6.5 0 0 1 3 6" />
   </Svg>
 );
+export const IconRepeat = () => (
+  <Svg>
+    <path d="M17 2l3 3-3 3" />
+    <path d="M4 11V9a4 4 0 0 1 4-4h12" />
+    <path d="M7 22l-3-3 3-3" />
+    <path d="M20 13v2a4 4 0 0 1-4 4H4" />
+  </Svg>
+);
+
 export const IconWealth = () => (
   <Svg>
     <path d="M12 3v9l7.8 4.5" />

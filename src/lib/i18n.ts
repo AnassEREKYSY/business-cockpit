@@ -3,6 +3,7 @@ import frApp from '../i18n/fr-app';
 import frMoney from '../i18n/fr-money';
 import frOverview from '../i18n/fr-overview';
 import frProjects from '../i18n/fr-projects';
+import frSubs from '../i18n/fr-subs';
 import frWealth from '../i18n/fr-wealth';
 
 /*
@@ -15,7 +16,7 @@ import frWealth from '../i18n/fr-wealth';
 export type Lang = 'en' | 'fr';
 
 const KEY = 'cockpit-lang';
-const FR: Record<string, string> = { ...frApp, ...frOverview, ...frProjects, ...frMoney, ...frWealth };
+const FR: Record<string, string> = { ...frApp, ...frOverview, ...frProjects, ...frMoney, ...frWealth, ...frSubs };
 
 function read(): Lang {
   try {
