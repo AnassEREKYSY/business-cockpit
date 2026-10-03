@@ -47,6 +47,7 @@ create table if not exists properties (
   id              uuid primary key default gen_random_uuid(),
   user_id         uuid not null default auth.uid() references auth.users on delete cascade,
   name            text not null,
+  platform        text not null default 'direct' check (platform in ('direct', 'stake')),
   city            text not null default '',
   currency        text not null default 'EUR',
   purchase_date   date,

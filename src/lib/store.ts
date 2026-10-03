@@ -66,7 +66,7 @@ export const localRepository: Repository = {
 
 export function emptyData(): AppData {
   return {
-    profile: { name: '', email: '', company: '', currency: 'EUR', targetPct: 30, alertPct: 12, avatar: '', investIsin: '', investMic: '', investName: '', revenueGoal: 0, tax: { ...DEFAULT_TAX }, wealth: { eurMad: 10.8, eurUsd: 1.08 } },
+    profile: { name: '', email: '', company: '', currency: 'EUR', targetPct: 30, alertPct: 12, avatar: '', investIsin: '', investMic: '', investName: '', revenueGoal: 0, tax: { ...DEFAULT_TAX }, wealth: { eurMad: 10.8, eurUsd: 1.08, eurAed: 3.97 } },
     clients: [],
     projects: [],
     tasks: [],
@@ -208,6 +208,7 @@ export function normalize(d: Partial<AppData>): AppData {
       wealth: {
         eurMad: Number(p.wealth?.eurMad) > 0 ? Number(p.wealth?.eurMad) : 10.8,
         eurUsd: Number(p.wealth?.eurUsd) > 0 ? Number(p.wealth?.eurUsd) : 1.08,
+        eurAed: Number(p.wealth?.eurAed) > 0 ? Number(p.wealth?.eurAed) : 3.97,
       },
     },
     clients,
@@ -285,7 +286,7 @@ function normWealth(d: Partial<AppData>): Pick<AppData, 'assets' | 'trades' | 'a
   const properties: Property[] = (d.properties ?? [])
     .filter((x) => text(x.name).trim())
     .map((x, i) => ({
-      id: idOf(x.id), name: text(x.name).trim(), city: text(x.city).trim(), currency: CURRENCY.test(text(x.currency)) ? text(x.currency) : 'EUR',
+      id: idOf(x.id), name: text(x.name).trim(), platform: (x.platform === 'stake' ? 'stake' : 'direct') as Property['platform'], city: text(x.city).trim(), currency: CURRENCY.test(text(x.currency)) ? text(x.currency) : 'EUR',
       purchaseDate: day(x.purchaseDate), purchasePrice: amount(x.purchasePrice), value: amount(x.value), debt: amount(x.debt),
       rent: amount(x.rent), charges: amount(x.charges), loan: amount(x.loan), notes: text(x.notes),
       position: Number.isFinite(Number(x.position)) && x.position !== null ? Number(x.position) : i,
@@ -344,14 +345,20 @@ function demoWealth(m: (off: number, day: number) => string): Pick<AppData, 'ass
     ...[1500, 1530, 1560, 1601, 1640].map((p, i) => ({ id: uid(), assetId: cdg, date: m(4 - i, 28), price: p })),
   ];
   const home = uid();
+  const [s1, s2] = [uid(), uid()];
   const properties: Property[] = [
-    { id: home, name: 'Apartment Maarif', city: 'Casablanca', currency: 'MAD', purchaseDate: '2024-06-01', purchasePrice: 1200000, value: 1320000, debt: 760000, rent: 6500, charges: 650, loan: 5200, notes: 'Two-bedroom, rented unfurnished.', position: 0 },
+    { id: s1, name: '1BR Dubai Marina', platform: 'stake', city: 'Dubai', currency: 'AED', purchaseDate: '2025-09-15', purchasePrice: 20000, value: 21400, debt: 0, rent: 135, charges: 12, loan: 0, notes: 'Fractional share bought on Stake.', position: 1 },
+    { id: s2, name: 'Studio JVC', platform: 'stake', city: 'Dubai', currency: 'AED', purchaseDate: '2026-02-10', purchasePrice: 10000, value: 10350, debt: 0, rent: 62, charges: 6, loan: 0, notes: '', position: 2 },
+    { id: home, name: 'Apartment Maarif', platform: 'direct', city: 'Casablanca', currency: 'MAD', purchaseDate: '2024-06-01', purchasePrice: 1200000, value: 1320000, debt: 760000, rent: 6500, charges: 650, loan: 5200, notes: 'Two-bedroom, rented unfurnished.', position: 0 },
   ];
   const propertyEntries: PropertyEntry[] = [];
   for (let i = 5; i >= 0; i--) {
     propertyEntries.push({ id: uid(), propertyId: home, date: m(i, 5), kind: 'rent', amount: 6500, label: 'Rent' });
     propertyEntries.push({ id: uid(), propertyId: home, date: m(i, 10), kind: 'loan', amount: 5200, label: 'Mortgage' });
     if (i % 3 === 1) propertyEntries.push({ id: uid(), propertyId: home, date: m(i, 18), kind: 'expense', amount: 1950, label: 'Syndic & repairs' });
+    propertyEntries.push({ id: uid(), propertyId: s1, date: m(i, 12), kind: 'rent', amount: 128 + (i % 3) * 6, label: 'Rent' });
+    propertyEntries.push({ id: uid(), propertyId: s1, date: m(i, 12), kind: 'expense', amount: 12, label: 'Monthly charges' });
+    if (i <= 4) propertyEntries.push({ id: uid(), propertyId: s2, date: m(i, 12), kind: 'rent', amount: 58 + (i % 2) * 5, label: 'Rent' });
   }
   return { assets, trades, assetPrices, properties, propertyEntries };
 }

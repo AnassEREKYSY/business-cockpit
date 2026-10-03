@@ -185,7 +185,7 @@ If you push first, the app shows a "One database update to run" screen with the 
 
 Your copy of the code is in your GitHub account, and every change you push to it goes online automatically (Vercel rebuilds the site in about a minute).
 
-The easiest way to change things without knowing how to code: open your copy with an AI coding assistant (for example Claude Code or Cursor) and describe what you want, like "make the main colour green" or "add an Insurance category to the costs".
+The colours and fonts are set once, as tokens at the top of the "v6" section of `src/index.css`: change a value there and the whole app follows, in light and dark mode.
 
 Where things live, if you want to look yourself:
 

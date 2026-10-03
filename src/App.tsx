@@ -28,13 +28,13 @@ import { money } from './lib/format';
 export type Page = 'overview' | 'projects' | 'clients' | 'fin' | 'wealth' | 'data';
 export type Account = { email: string; signOut: () => void };
 
-const PAGES: { key: Page; hash: string; label: string; Icon: () => React.JSX.Element }[] = [
+const PAGES: { key: Page; hash: string; label: string; short?: string; Icon: () => React.JSX.Element }[] = [
   { key: 'overview', hash: '', label: 'Overview', Icon: IconOverview },
   { key: 'projects', hash: 'projects', label: 'Projects', Icon: IconProjects },
   { key: 'clients', hash: 'clients', label: 'Clients', Icon: IconClients },
   { key: 'fin', hash: 'finances', label: 'Finances', Icon: IconFinance },
   { key: 'wealth', hash: 'wealth', label: 'Wealth', Icon: IconWealth },
-  { key: 'data', hash: 'data', label: 'Data & profile', Icon: IconData },
+  { key: 'data', hash: 'data', label: 'Data & profile', short: 'Profile', Icon: IconData },
 ];
 
 type Route = { page: Page; projectId: string };
@@ -227,10 +227,11 @@ export default function App({ repo, account }: { repo: Repository; account?: Acc
     ...data.clients.map((c) => ({ id: 'c-' + c.id, group: t('Clients'), label: c.name, hint: t('Client'), color: c.color, when: 'query' as const, run: () => go('data') })),
   ];
 
-  const nav = PAGES.map(({ key, label, Icon }) => (
+  const nav = PAGES.map(({ key, label, short, Icon }) => (
     <button key={key} className={'nav-btn' + (page === key ? ' on' : '')} onClick={() => setPage(key)} aria-current={page === key ? 'page' : undefined} title={t(label)}>
       <Icon />
       <span className="nav-label">{t(label)}</span>
+      {short && <span className="nav-short">{t(short)}</span>}
     </button>
   ));
   const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform);

@@ -4,7 +4,7 @@ import type { Quote } from './quotes';
 
 export const ACCOUNTS: Record<AccountKey, { label: string; currency: string; hint: string }> = {
   tr: { label: 'Trade Republic', currency: 'EUR', hint: 'ETFs, stocks and crypto, live prices' },
-  ma: { label: 'Morocco', currency: 'MAD', hint: 'Bourse de Casablanca and OPCVM, prices typed by hand' },
+  ma: { label: 'Bourse de Casablanca', currency: 'MAD', hint: 'Moroccan stocks and OPCVM, prices typed by hand' },
   other: { label: 'Other', currency: 'EUR', hint: 'Any other account' },
 };
 
@@ -26,6 +26,7 @@ export function fxRates(data: AppData, quotes: Record<string, Quote>): Fx {
     EUR: 1,
     MAD: quotes['EURMAD=X']?.price || data.profile.wealth.eurMad,
     USD: quotes['EURUSD=X']?.price || data.profile.wealth.eurUsd,
+    AED: quotes['EURAED=X']?.price || data.profile.wealth.eurAed,
   };
 }
 /** Convert between currencies through EUR. Unknown currencies are taken as EUR. */

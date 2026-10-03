@@ -64,18 +64,12 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
 /** Brand mark, drawn inline so it follows the theme (ink square, background-coloured gauge). */
 export const BrandMark = ({ size = 32 }: { size?: number }) => (
   <svg viewBox="0 0 1250 1408" className="brand-logo" style={{ height: `${size / 16}rem`, width: `${(size * 1250) / 1408 / 16}rem` }} aria-hidden="true">
-    <defs>
-      <linearGradient id="brand-grad" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stopColor="#6366f1" />
-        <stop offset="1" stopColor="#a855f7" />
-      </linearGradient>
-    </defs>
-    <rect x="0" y="79" width="1250" height="1250" rx="320" fill="url(#brand-grad)" />
-    <g fill="none" stroke="#fff" strokeLinecap="round">
+    <rect x="0" y="79" width="1250" height="1250" rx="320" style={{ fill: 'var(--accent)' }} />
+    <g fill="none" strokeLinecap="round" style={{ stroke: 'var(--accent-fg)' }}>
       <path d="M370 959 A360 360 0 1 1 880 959" strokeWidth="110" />
-      <path className="brand-needle" d="M625 704 L816 513" strokeWidth="90" />
+      <path className="brand-needle" d="M625 704 L816 513" strokeWidth="90" style={{ stroke: 'var(--brand-needle)' }} />
     </g>
-    <circle cx="625" cy="704" r="85" fill="#fff" />
+    <circle cx="625" cy="704" r="85" style={{ fill: 'var(--accent-fg)' }} />
   </svg>
 );
 

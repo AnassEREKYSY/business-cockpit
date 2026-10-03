@@ -103,7 +103,7 @@ export function toRows(d: AppData, userId: string): Rows {
     })),
     asset_prices: d.assetPrices.filter((x) => aids.has(x.assetId)).map((x: AssetPrice) => ({ id: x.id, asset_id: x.assetId, date: x.date, price: x.price })),
     properties: d.properties.map((x: Property) => ({
-      id: x.id, name: x.name, city: x.city, currency: x.currency, purchase_date: orNull(x.purchaseDate), purchase_price: x.purchasePrice,
+      id: x.id, name: x.name, platform: x.platform, city: x.city, currency: x.currency, purchase_date: orNull(x.purchaseDate), purchase_price: x.purchasePrice,
       value: x.value, debt: x.debt, rent: x.rent, charges: x.charges, loan: x.loan, notes: x.notes, position: x.position,
     })),
     property_entries: d.propertyEntries.filter((x) => hids.has(x.propertyId)).map((x: PropertyEntry) => ({
@@ -183,7 +183,7 @@ export function fromRows(r: { profile: Row | null } & Record<ListTable, Row[]>):
     })),
     assetPrices: r.asset_prices.map((x) => ({ id: str(x.id), assetId: str(x.asset_id), date: str(x.date), price: Number(x.price) })),
     properties: r.properties.map((x) => ({
-      id: str(x.id), name: str(x.name), city: str(x.city), currency: str(x.currency), purchaseDate: str(x.purchase_date),
+      id: str(x.id), name: str(x.name), platform: (str(x.platform) === 'stake' ? 'stake' : 'direct') as Property['platform'], city: str(x.city), currency: str(x.currency), purchaseDate: str(x.purchase_date),
       purchasePrice: Number(x.purchase_price ?? 0), value: Number(x.value ?? 0), debt: Number(x.debt ?? 0), rent: Number(x.rent ?? 0),
       charges: Number(x.charges ?? 0), loan: Number(x.loan ?? 0), notes: str(x.notes), position: Number(x.position ?? 0),
     })),

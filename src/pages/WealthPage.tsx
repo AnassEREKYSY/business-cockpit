@@ -17,7 +17,7 @@ import {
 import type { AccountKey, AppData, Asset, AssetKind, Property, PropertyEntry, Trade } from '../types';
 
 type Update = (fn: (d: AppData) => AppData) => void;
-type Tab = 'overview' | AccountKey | 'estate';
+type Tab = 'overview' | AccountKey | 'estate' | 'stake';
 
 const TAB_KEY = 'cockpit.wealthTab';
 const KIND_COLOR: Record<AssetKind, string> = {
@@ -52,7 +52,7 @@ export default function WealthPage({ data, update }: { data: AppData; update: Up
     }
   };
   const first = data.trades[0]?.date ?? '';
-  const symbols = useMemo(() => [...data.assets.filter((a) => a.symbol).map((a) => a.symbol), 'EURMAD=X', 'EURUSD=X'], [data.assets]);
+  const symbols = useMemo(() => [...data.assets.filter((a) => a.symbol).map((a) => a.symbol), 'EURMAD=X', 'EURUSD=X', 'EURAED=X'], [data.assets]);
   const feed = useQuotes(symbols, rangeFor(first));
   const fx = fxRates(data, feed.quotes);
 
@@ -95,13 +95,14 @@ export default function WealthPage({ data, update }: { data: AppData; update: Up
         label={t('Section')}
         value={tab}
         onChange={setTab}
-        options={[['overview', t('Overview')], ['tr', t('Trade Republic')], ['ma', t('Morocco')], ['estate', t('Real estate')], ...(data.assets.some((a) => a.account === 'other') ? [['other', t('Other')] as [Tab, string]] : [])]}
+        options={[['overview', t('Overview')], ['tr', t('Trade Republic')], ['ma', t('Bourse de Casablanca')], ['stake', t('Stake')], ['estate', t('Real estate')], ...(data.assets.some((a) => a.account === 'other') ? [['other', t('Other')] as [Tab, string]] : [])]}
       />
 
       <div className="page-tab" key={tab}>
         {tab === 'overview' && <Overview data={data} quotes={feed.quotes} fx={fx} setTab={setTab} />}
         {(tab === 'tr' || tab === 'ma' || tab === 'other') && <Account data={data} update={update} account={tab} quotes={feed.quotes} fx={fx} />}
-        {tab === 'estate' && <RealEstate data={data} update={update} fx={fx} />}
+        {tab === 'estate' && <RealEstate key="direct" platform="direct" data={data} update={update} fx={fx} />}
+        {tab === 'stake' && <RealEstate key="stake" platform="stake" data={data} update={update} fx={fx} />}
       </div>
     </section>
   );
@@ -133,10 +134,11 @@ function Overview({ data, quotes, fx, setTab }: { data: AppData; quotes: Record<
     return (
       <div className="empty wealth-empty">
         <b>{t('Track everything you own in one place.')}</b>
-        <span>{t('Add your Trade Republic positions (live prices), your Moroccan stocks and OPCVM, and your rentals.')}</span>
+        <span>{t('Add your Trade Republic positions (live prices), your Bourse de Casablanca stocks and OPCVM, your Stake shares in Dubai and your rentals.')}</span>
         <div className="row" style={{ justifyContent: 'center', gap: '0.5rem' }}>
           <button className="btn sm" onClick={() => setTab('tr')}>{t('Trade Republic')}</button>
-          <button className="btn sm outline" onClick={() => setTab('ma')}>{t('Morocco')}</button>
+          <button className="btn sm outline" onClick={() => setTab('ma')}>{t('Bourse de Casablanca')}</button>
+          <button className="btn sm outline" onClick={() => setTab('stake')}>{t('Stake')}</button>
           <button className="btn sm outline" onClick={() => setTab('estate')}>{t('Real estate')}</button>
         </div>
       </div>
@@ -182,12 +184,18 @@ function Overview({ data, quotes, fx, setTab }: { data: AppData; quotes: Record<
                 id: a.k, label: t(ACCOUNTS[a.k].label), value: a.t.value, color: CAT[i], onClick: () => setTab(a.k),
                 sub: <span style={{ color: tone(a.t.gain) }}>{signed(a.t.gain, cur)}{a.t.gainPct !== null ? ` · ${pct(a.t.gainPct)}` : ''}</span>,
               })),
-              ...(props.length
-                ? [{ id: 'estate', label: t('Real estate (equity)'), value: estateValue - estateDebt, color: CAT[5], onClick: () => setTab('estate'), sub: tn(props.length, '{n} property', '{n} properties') }]
-                : []),
+              ...(['stake', 'direct'] as const).flatMap((pf, i) => {
+                const mine = props.filter((x) => x.p.platform === pf);
+                if (!mine.length) return [];
+                const eq = mine.reduce((a, x) => a + convert(x.p.value - x.p.debt, x.p.currency, cur, fx), 0);
+                return [{
+                  id: pf, label: pf === 'stake' ? t('Stake (Dubai)') : t('Real estate (equity)'), value: eq, color: CAT[5 + i], onClick: () => setTab(pf === 'stake' ? 'stake' : 'estate'),
+                  sub: pf === 'stake' ? tn(mine.length, '{n} share', '{n} shares') : tn(mine.length, '{n} property', '{n} properties'),
+                }];
+              }),
             ]}
           />
-          <div className="small">{t('Moroccan dirhams converted at 1 € = {rate} MAD.', { rate: fx.MAD.toLocaleString(locale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 }) })}</div>
+          <div className="small">{t('Converted at 1 € = {mad} MAD · {aed} AED.', { mad: fx.MAD.toLocaleString(locale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 }), aed: fx.AED.toLocaleString(locale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 }) })}</div>
         </div>
       </div>
 
@@ -199,7 +207,7 @@ function Overview({ data, quotes, fx, setTab }: { data: AppData; quotes: Record<
           </div>
           <LineChart
             points={series}
-            lines={[{ label: t('Value'), color: 'var(--ink)', area: true }, { label: t('Invested'), color: 'var(--muted)', dashed: true }]}
+            lines={[{ label: t('Value'), color: 'var(--accent)', area: true }, { label: t('Invested'), color: 'var(--mauve)', dashed: true }]}
             format={(n) => compactMoney(n, cur)}
             formatT={(d) => fmtDate(d, false)}
           />
@@ -299,7 +307,7 @@ function Account({ data, update, account, quotes, fx }: { data: AppData; update:
               </div>
               <LineChart
                 points={series}
-                lines={[{ label: t('Value'), color: 'var(--ink)', area: true }, { label: t('Invested'), color: 'var(--muted)', dashed: true }]}
+                lines={[{ label: t('Value'), color: 'var(--accent)', area: true }, { label: t('Invested'), color: 'var(--mauve)', dashed: true }]}
                 format={(n) => compactMoney(n, cur)}
                 formatT={(d) => fmtDate(d)}
               />
@@ -375,7 +383,7 @@ const SIDE_OPTIONS = [
 // Functions, so the labels follow the language.
 const kindOptions = () => KINDS.map((k) => ({ value: k.key, label: t(k.label), color: KIND_COLOR[k.key] }));
 const accountOptions = () => (Object.keys(ACCOUNTS) as AccountKey[]).map((k) => ({ value: k, label: t(ACCOUNTS[k].label) }));
-const CURRENCY_OPTIONS = ['EUR', 'MAD', 'USD'].map((c) => ({ value: c, label: c }));
+const CURRENCY_OPTIONS = ['EUR', 'MAD', 'AED', 'USD'].map((c) => ({ value: c, label: c }));
 
 /** Positive number with up to 8 decimals ("0.025", "1 250,5"). */
 function parseNum(raw: string): number | null {
@@ -644,17 +652,19 @@ function PricesModal({ assets, data, update, onClose }: { assets: Asset[]; data:
 
 /* ---------------- Real estate ---------------- */
 
-function RealEstate({ data, update, fx }: { data: AppData; update: Update; fx: Fx }) {
+function RealEstate({ data, update, fx, platform }: { data: AppData; update: Update; fx: Fx; platform: Property['platform'] }) {
   const cur = data.profile.currency;
+  const stake = platform === 'stake';
+  const mine = data.properties.filter((p) => p.platform === platform);
   const [editing, setEditing] = useState<Property | null>(null);
-  const [open, setOpen] = useState<string | null>(data.properties[0]?.id ?? null);
+  const [open, setOpen] = useState<string | null>(mine[0]?.id ?? null);
   const toast = useToast();
-  const props = data.properties.map((p) => ({ p, s: propertyStats(data, p) }));
+  const props = mine.map((p) => ({ p, s: propertyStats(data, p) }));
   const total = (f: (x: { p: Property; s: ReturnType<typeof propertyStats> }) => number) =>
     props.reduce((a, x) => a + convert(f(x), x.p.currency, cur, fx), 0);
 
   const newProperty = (): Property => ({
-    id: uid(), name: '', city: '', currency: 'MAD', purchaseDate: '', purchasePrice: 0, value: 0, debt: 0, rent: 0, charges: 0, loan: 0, notes: '',
+    id: uid(), name: '', platform, city: stake ? 'Dubai' : '', currency: stake ? 'AED' : 'MAD', purchaseDate: '', purchasePrice: 0, value: 0, debt: 0, rent: 0, charges: 0, loan: 0, notes: '',
     position: data.properties.reduce((a, x) => Math.max(a, x.position), -1) + 1,
   });
   const logMonth = (p: Property) => {
@@ -677,17 +687,17 @@ function RealEstate({ data, update, fx }: { data: AppData; update: Update; fx: F
     <div className="section loose">
       <div className="head">
         <div>
-          <h2>{t('Real estate')}</h2>
-          <span className="sub">{t("Each property, what it's worth and what it brings in every month")}</span>
+          <h2>{stake ? t('Stake') : t('Real estate')}</h2>
+          <span className="sub">{stake ? t('Your shares in Dubai properties, their value and the rent paid out each month') : t("Each property, what it's worth and what it brings in every month")}</span>
         </div>
-        <button className="btn" onClick={() => setEditing(newProperty())}>{t('+ Add a property')}</button>
+        <button className="btn" onClick={() => setEditing(newProperty())}>{stake ? t('+ Add a Stake property') : t('+ Add a property')}</button>
       </div>
 
       {props.length === 0 ? (
         <div className="empty wealth-empty">
-          <b>{t('No property yet.')}</b>
-          <span>{t('Add a house or an apartment with its price, rent, charges and loan. Then log each month in one click.')}</span>
-          <button className="btn sm" style={{ alignSelf: 'center' }} onClick={() => setEditing(newProperty())}>{t('+ Add a property')}</button>
+          <b>{stake ? t('No Stake property yet.') : t('No property yet.')}</b>
+          <span>{stake ? t('Add each property you hold on Stake with the amount you invested, the value of your share and the monthly rent. Then log each payout in one click.') : t('Add a house or an apartment with its price, rent, charges and loan. Then log each month in one click.')}</span>
+          <button className="btn sm" style={{ alignSelf: 'center' }} onClick={() => setEditing(newProperty())}>{stake ? t('+ Add a Stake property') : t('+ Add a property')}</button>
         </div>
       ) : (
         <>
@@ -698,14 +708,14 @@ function RealEstate({ data, update, fx }: { data: AppData; update: Update; fx: F
               <div className="kpi-s">{tn(props.length, '{n} property', '{n} properties')}</div>
             </div>
             <div className="kpi">
-              <div className="kpi-k">{t('Equity')}</div>
-              <div className="kpi-v">{fmtMoney(total((x) => x.s.equity), cur)}</div>
-              <div className="kpi-s">{t('{amount} still owed', { amount: fmtMoney(total((x) => x.p.debt), cur) })}</div>
+              <div className="kpi-k">{stake ? t('Invested') : t('Equity')}</div>
+              <div className="kpi-v">{fmtMoney(stake ? total((x) => x.p.purchasePrice) : total((x) => x.s.equity), cur)}</div>
+              <div className="kpi-s">{stake ? t('{amount} since purchase', { amount: signed(total((x) => x.s.appreciation), cur) }) : t('{amount} still owed', { amount: fmtMoney(total((x) => x.p.debt), cur) })}</div>
             </div>
             <div className="kpi">
-              <div className="kpi-k">{t('Cash flow / month')}</div>
+              <div className="kpi-k">{stake ? t('Payout / month') : t('Cash flow / month')}</div>
               <div className="kpi-v" style={{ color: tone(total((x) => x.s.cashflow)) }}>{fmtMoney(total((x) => x.s.cashflow), cur)}</div>
-              <div className="kpi-s">{t('Rent − charges − loan')}</div>
+              <div className="kpi-s">{stake ? t('Rent − fees') : t('Rent − charges − loan')}</div>
             </div>
             <div className="kpi">
               <div className="kpi-k">{t('Last 12 months')}</div>
@@ -731,7 +741,7 @@ function RealEstate({ data, update, fx }: { data: AppData; update: Update; fx: F
           )}
 
           {props.map(({ p, s }, i) => (
-            <PropertyCard key={p.id} p={p} s={s} color={CAT[i % CAT.length]} data={data} update={update} open={open === p.id} onToggle={() => setOpen(open === p.id ? null : p.id)} onEdit={() => setEditing(p)} onLog={() => logMonth(p)} />
+            <PropertyCard key={p.id} stake={stake} p={p} s={s} color={CAT[i % CAT.length]} data={data} update={update} open={open === p.id} onToggle={() => setOpen(open === p.id ? null : p.id)} onEdit={() => setEditing(p)} onLog={() => logMonth(p)} />
           ))}
         </>
       )}
@@ -740,7 +750,8 @@ function RealEstate({ data, update, fx }: { data: AppData; update: Update; fx: F
   );
 }
 
-function PropertyCard({ p, s, color, data, update, open, onToggle, onEdit, onLog }: {
+function PropertyCard({ stake, p, s, color, data, update, open, onToggle, onEdit, onLog }: {
+  stake: boolean;
   p: Property;
   s: ReturnType<typeof propertyStats>;
   color: string;
@@ -799,8 +810,12 @@ function PropertyCard({ p, s, color, data, update, open, onToggle, onEdit, onLog
       </div>
       <div className="prop-stats">
         <div><span className="small">{t('Value')}</span><b>{m(p.value)}</b>{s.appreciation ? <span className="small" style={{ color: tone(s.appreciation) }}>{t('{amount} since purchase', { amount: signed(s.appreciation, c) })}</span> : null}</div>
-        <div><span className="small">{t('Equity')}</span><b>{m(s.equity)}</b><span className="small">{t('{amount} owed', { amount: m(p.debt) })}</span></div>
-        <div><span className="small">{t('Cash flow / month')}</span><b style={{ color: tone(s.cashflow) }}>{m(s.cashflow)}</b><span className="small">{t('{amount} rent', { amount: m(p.rent) })}</span></div>
+        {stake ? (
+          <div><span className="small">{t('Invested')}</span><b>{m(p.purchasePrice)}</b><span className="small">{t('your share')}</span></div>
+        ) : (
+          <div><span className="small">{t('Equity')}</span><b>{m(s.equity)}</b><span className="small">{t('{amount} owed', { amount: m(p.debt) })}</span></div>
+        )}
+        <div><span className="small">{stake ? t('Payout / month') : t('Cash flow / month')}</span><b style={{ color: tone(s.cashflow) }}>{m(s.cashflow)}</b><span className="small">{t('{amount} rent', { amount: m(p.rent) })}</span></div>
         <div><span className="small">{t('Yield')}</span><b>{s.grossYield !== null ? pct(s.grossYield) : '—'}</b><span className="small">{t('gross · {net} net', { net: s.netYield !== null ? pct(s.netYield) : '—' })}</span></div>
         <div><span className="small">{t('Generated')}</span><b style={{ color: tone(s.totalAll) }}>{m(s.totalAll)}</b><span className="small">{t('net, all logged months')}</span></div>
       </div>
@@ -818,25 +833,25 @@ function PropertyCard({ p, s, color, data, update, open, onToggle, onEdit, onLog
               </div>
             ))}
           </div>
-          <div className="chart-legend"><span><span className="swatch" style={{ background: 'var(--c-pos)' }} />{t('Rent')}</span><span><span className="swatch" style={{ background: 'var(--c-exp)' }} />{t('Expenses + loan')}</span></div>
+          <div className="chart-legend"><span><span className="swatch" style={{ background: 'var(--c-pos)' }} />{t('Rent')}</span><span><span className="swatch" style={{ background: 'var(--c-exp)' }} />{stake ? t('Fees') : t('Expenses + loan')}</span></div>
           {p.notes && <div className="small client-notes">{p.notes}</div>}
           <form className="time-form" onSubmit={(e) => { e.preventDefault(); add(); }}>
-            <Seg label={t('Kind')} value={kind} onChange={setKind} options={[['rent', t('Rent')], ['expense', t('Expense')], ['loan', t('Loan')]]} />
+            <Seg label={t('Kind')} value={kind} onChange={setKind} options={stake ? [['rent', t('Rent')], ['expense', t('Fee')]] : [['rent', t('Rent')], ['expense', t('Expense')], ['loan', t('Loan')]]} />
             <div className="note-ctl"><DatePicker value={date} onChange={setDate} clearable={false} size="sm" ariaLabel={t('Date')} /></div>
             <input className="input time-dur" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={t('Amount ({currency})', { currency: c })} aria-label={t('Amount')} />
-            <input className="input time-note" value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t('Label (repairs, tax, insurance…)')} aria-label={t('Label')} />
+            <input className="input time-note" value={label} onChange={(e) => setLabel(e.target.value)} placeholder={stake ? t('Label (service charge, Stake fee…)') : t('Label (repairs, tax, insurance…)')} aria-label={t('Label')} />
             <button className="btn sm" type="submit" disabled={!a}>{t('Add')}</button>
           </form>
           <div className="time-list">
             {entries.slice(0, 12).map((e) => (
               <div className="time-row" key={e.id}>
                 <span className="time-date">{fmtDate(e.date, true)} {e.date.slice(2, 4)}</span>
-                <span className="ellipsis time-what"><span className={'op-side ' + (e.kind === 'rent' ? 'buy' : 'sell')}>{e.kind === 'rent' ? t('Rent') : e.kind === 'loan' ? t('Loan') : t('Expense')}</span>{t(e.label)}</span>
+                <span className="ellipsis time-what"><span className={'op-side ' + (e.kind === 'rent' ? 'buy' : 'sell')}>{e.kind === 'rent' ? t('Rent') : e.kind === 'loan' ? t('Loan') : stake ? t('Fee') : t('Expense')}</span>{t(e.label)}</span>
                 <b className="time-dur-v" style={{ color: e.kind === 'rent' ? 'var(--green)' : undefined }}>{e.kind === 'rent' ? '+' : '−'} {m(e.amount)}</b>
                 <button className="x" onClick={() => remove(e)} aria-label={t('Delete entry')}>×</button>
               </div>
             ))}
-            {entries.length === 0 && <div className="empty">{t('Nothing logged yet. "Log this month" adds the rent, loan and charges from the property\'s settings.')}</div>}
+            {entries.length === 0 && <div className="empty">{stake ? t('Nothing logged yet. "Log this month" adds the rent and fees from the property\'s settings.') : t('Nothing logged yet. "Log this month" adds the rent, loan and charges from the property\'s settings.')}</div>}
           </div>
         </>
       )}
@@ -846,6 +861,7 @@ function PropertyCard({ p, s, color, data, update, open, onToggle, onEdit, onLog
 
 function PropertyModal({ property, data, update, onClose }: { property: Property; data: AppData; update: Update; onClose: () => void }) {
   const creating = !data.properties.some((p) => p.id === property.id);
+  const stake = property.platform === 'stake';
   const [f, setF] = useState(property);
   const num = (k: keyof Property) => (f[k] ? String(f[k]) : '');
   const [vals, setVals] = useState({ purchasePrice: num('purchasePrice'), value: num('value'), debt: num('debt'), rent: num('rent'), charges: num('charges'), loan: num('loan') });
@@ -873,21 +889,32 @@ function PropertyModal({ property, data, update, onClose }: { property: Property
     </Field>
   );
   return (
-    <Modal title={creating ? t('New property') : t('Edit property')} onClose={onClose}>
+    <Modal title={stake ? (creating ? t('New Stake property') : t('Edit Stake property')) : creating ? t('New property') : t('Edit property')} onClose={onClose}>
       <form className="section" onSubmit={(e) => { e.preventDefault(); save(); }}>
         <div className="form-grid">
-          <Field label={t('Name')}><input className="input" autoFocus={creating} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder={t('Apartment Maarif')} /></Field>
-          <Field label={t('City')}><input className="input" value={f.city} onChange={(e) => setF({ ...f, city: e.target.value })} placeholder="Casablanca" /></Field>
+          <Field label={t('Name')}><input className="input" autoFocus={creating} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder={stake ? t('1BR in Dubai Marina') : t('Apartment Maarif')} /></Field>
+          <Field label={t('City')}><input className="input" value={f.city} onChange={(e) => setF({ ...f, city: e.target.value })} placeholder={stake ? 'Dubai' : 'Casablanca'} /></Field>
           <Field label={t('Currency')}><Select value={f.currency} onChange={(currency) => setF({ ...f, currency })} options={CURRENCY_OPTIONS} ariaLabel={t('Currency')} /></Field>
           <Field label={t('Bought on')}><DatePicker value={f.purchaseDate} onChange={(purchaseDate) => setF({ ...f, purchaseDate })} placeholder={t('Date')} ariaLabel={t('Bought on')} /></Field>
-          {field('purchasePrice', t('Purchase price'), t('With fees'))}
-          {field('value', t('Value today'), t('Estimate'))}
-          {field('debt', t('Loan still owed'))}
-          {field('rent', t('Rent / month'))}
-          {field('charges', t('Charges / month'), t('Syndic, tax, insurance…'))}
-          {field('loan', t('Loan payment / month'))}
+          {stake ? (
+            <>
+              {field('purchasePrice', t('Amount invested'), t('With fees'))}
+              {field('value', t('Value of your share'), t('From the Stake app'))}
+              {field('rent', t('Monthly rental income'))}
+              {field('charges', t('Fees / month'))}
+            </>
+          ) : (
+            <>
+              {field('purchasePrice', t('Purchase price'), t('With fees'))}
+              {field('value', t('Value today'), t('Estimate'))}
+              {field('debt', t('Loan still owed'))}
+              {field('rent', t('Rent / month'))}
+              {field('charges', t('Charges / month'), t('Syndic, tax, insurance…'))}
+              {field('loan', t('Loan payment / month'))}
+            </>
+          )}
         </div>
-        <Field label={t('Notes')}><textarea className="input" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} placeholder={t('Tenant, lease end, works planned…')} /></Field>
+        <Field label={t('Notes')}><textarea className="input" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} placeholder={stake ? t('Number of shares, occupancy, exit date…') : t('Tenant, lease end, works planned…')} /></Field>
         {bad && <div className="small form-error">{t("One of the amounts isn't valid. Examples: 1200000 · 6 500 · 650.50")}</div>}
         <div className="modal-foot">
           {creating ? <span /> : <button className="btn sm danger" type="button" onClick={remove}>{t('Delete property')}</button>}

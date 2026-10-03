@@ -50,6 +50,7 @@ export interface WealthSettings {
   /** Fallback rates, 1 EUR = x MAD / x USD, used when live rates can't be loaded. */
   eurMad: number;
   eurUsd: number;
+  eurAed: number;
 }
 
 /** A person at a client company. */
@@ -244,6 +245,8 @@ export interface AssetPrice {
 export interface Property {
   id: string;
   name: string;
+  /** 'direct': a property you own. 'stake': a share bought on Stake (fractional real estate, UAE). */
+  platform: 'direct' | 'stake';
   city: string;
   currency: string;
   purchaseDate: string;
