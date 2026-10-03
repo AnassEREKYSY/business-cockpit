@@ -31,7 +31,7 @@ export const COLUMNS: { key: TaskColumn; label: string; dot: string }[] = [
 ];
 
 export const CATEGORIES: Record<EntryType, string[]> = {
-  revenue: ['Services', 'Subscriptions / retainers', 'Products', 'Other income'],
+  revenue: ['Services', 'Service provision', 'Subscriptions / retainers', 'Products', 'Trading', 'Investment', 'Real estate', 'Other income'],
   direct: ['Subcontracting', 'Project materials', 'Client licences'],
   opex: [
     'Software & SaaS',
@@ -50,6 +50,10 @@ const CATEGORY_LABELS: Record<string, string> = {
   'Subscriptions / retainers': 'Subscriptions / retainers',
   Products: 'Products',
   'Other income': 'Other income',
+  'Service provision': 'Service provision',
+  Trading: 'Trading',
+  Investment: 'Investment',
+  'Real estate': 'Real estate',
   'Subcontracting': 'Subcontracting',
   'Project materials': 'Project materials',
   'Client licences': 'Client licences',

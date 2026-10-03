@@ -8,7 +8,9 @@ import { DatePicker } from './Calendar';
 import { useToast } from './Toast';
 import { removeRow } from '../lib/undo';
 import { uid } from '../lib/format';
-import { ProjectSelect } from './pickers';
+import { ClientSelect, ProjectSelect } from './pickers';
+import { isTaxable, rateOn } from '../lib/tax';
+import { pct } from '../lib/format';
 import { Select } from './Select';
 import { Field, Modal, Seg } from './ui';
 
@@ -65,6 +67,9 @@ export function RecurringModal({ item, data, update, onClose }: { item: Recurrin
           <Field label="Project (optional)">
             <ProjectSelect projects={projects} clients={data.clients} value={f.projectId} onChange={(projectId) => setF({ ...f, projectId })} />
           </Field>
+          <Field label="Client (optional)">
+            <ClientSelect data={data} update={update} value={f.clientId} onChange={(clientId) => setF({ ...f, clientId })} inherited={data.clients.find((c) => c.id === data.projects.find((p) => p.id === f.projectId)?.clientId)} />
+          </Field>
           <Field label="Start date">
             <DatePicker value={f.start} onChange={(start) => setF({ ...f, start })} clearable={false} ariaLabel="Start date" />
           </Field>
@@ -94,7 +99,7 @@ export function RecurringModal({ item, data, update, onClose }: { item: Recurrin
 
 /** A blank transaction, opened in EntryModal to create one. */
 export const newEntry = (type: EntryType = 'revenue'): Entry => ({
-  id: uid(), date: isoDate(), label: '', type, category: CATEGORIES[type][0], amount: 0, projectId: '', paid: true, due: '',
+  id: uid(), date: isoDate(), label: '', type, category: CATEGORIES[type][0], amount: 0, projectId: '', paid: true, due: '', clientId: '',
 });
 
 export function EntryModal({ entry, data, update, onClose }: { entry: Entry; data: AppData; update: Update; onClose: () => void }) {
@@ -106,6 +111,7 @@ export function EntryModal({ entry, data, update, onClose }: { entry: Entry; dat
   const valid = !!amount && isDay(f.date) && (!f.due || isDay(f.due));
   const projects = data.projects.filter((p) => p.status !== 'Done' || p.id === f.projectId);
   const revenue = f.type === 'revenue';
+  const projectClient = (id: string) => data.projects.find((p) => p.id === id)?.clientId ?? '';
 
   const save = () => {
     if (!valid || !amount) return;
@@ -144,7 +150,10 @@ export function EntryModal({ entry, data, update, onClose }: { entry: Entry; dat
             <Select value={f.category} onChange={(category) => setF({ ...f, category })} options={catOptions(f.type)} ariaLabel="Category" />
           </Field>
           <Field label="Project (optional)">
-            <ProjectSelect projects={projects} clients={data.clients} value={f.projectId} onChange={(projectId) => setF({ ...f, projectId })} />
+            <ProjectSelect projects={projects} clients={data.clients} value={f.projectId} onChange={(projectId) => setF({ ...f, projectId, clientId: projectClient(projectId) === f.clientId ? '' : f.clientId })} />
+          </Field>
+          <Field label="Client (optional)">
+            <ClientSelect data={data} update={update} value={f.clientId} onChange={(clientId) => setF({ ...f, clientId: clientId === projectClient(f.projectId) ? '' : clientId })} inherited={data.clients.find((c) => c.id === projectClient(f.projectId))} />
           </Field>
           <Field label={`Amount excl. tax (${data.profile.currency})`}>
             <input className="input" inputMode="decimal" autoFocus={creating} value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} placeholder="0" />
@@ -161,6 +170,19 @@ export function EntryModal({ entry, data, update, onClose }: { entry: Entry; dat
           )}
         </div>
         {f.amount.trim() && !amount && <div className="small" style={{ color: 'var(--red)' }}>Invalid amount. Examples: 1200 · 1 200 · 1200.50</div>}
+        {amount && isTaxable(f) && isDay(f.date) && (() => {
+          const r = rateOn(data.profile.tax, f.date);
+          const t = (amount * r.total) / 100;
+          return (
+            <div className="tax-preview">
+              <span>Taxes {pct(r.total)}{r.acre ? ' (ACRE)' : ''}</span>
+              <b>− {money(t, data.profile.currency)}</b>
+              <span>Net</span>
+              <b>{money(amount - t, data.profile.currency)}</b>
+            </div>
+          );
+        })()}
+        {amount && f.type === 'revenue' && !isTaxable(f) && <div className="small">Not business turnover: no URSSAF contributions are counted on this category.</div>}
         <div className="modal-foot">
           {creating ? <span /> : <button className="btn sm danger" type="button" onClick={remove}>Delete</button>}
           <div className="row" style={{ gap: '0.5rem' }}>

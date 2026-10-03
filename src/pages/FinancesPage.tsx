@@ -3,18 +3,20 @@ import { MonthPicker } from '../components/Calendar';
 import { Seg } from '../components/ui';
 import { catLabel } from '../lib/constants';
 import { allTxns, isActive, monthlyEquivalent, sumType, totals } from '../lib/finance';
-import { fmtDate, fmtMonth, money, monthEnd, monthKey, pct, shiftMonth } from '../lib/format';
+import { fmtDate, fmtMonth, isoDate, money, monthEnd, monthKey, pct, shiftMonth } from '../lib/format';
 import { EntryModal, RecurringModal, newEntry } from '../components/MoneyForms';
 import { useToast } from '../components/Toast';
 import { isOverdue, projectStats, unpaidInvoices } from '../lib/stats';
 import { fmtDuration } from '../lib/time';
+import { rateOn, taxesOn } from '../lib/tax';
+import { HBars } from '../components/Charts';
 import type { AppData, Entry, Recurring } from '../types';
 
 type Update = (fn: (d: AppData) => AppData) => void;
 
 type Period = '1m' | '3m' | '12m' | 'all';
 
-export default function FinancesPage({ data, update, openProject }: { data: AppData; update: Update; openProject: (id: string) => void }) {
+export default function FinancesPage({ data, update, openProject, goToData }: { data: AppData; update: Update; openProject: (id: string) => void; goToData: () => void }) {
   const toast = useToast();
   // Clicking a recent transaction opens its edit form (a recurring line opens the subscription).
   const [editing, setEditing] = useState<{ entry?: Entry; recurring?: Recurring } | null>(null);
@@ -58,10 +60,15 @@ export default function FinancesPage({ data, update, openProject }: { data: AppD
     .filter((r) => r.s.revenue || r.s.costs || r.s.minutes || r.p.budget)
     .sort((a, b) => b.s.revenue - a.s.revenue);
   const subCount = activeRec.filter((r) => r.type !== 'revenue').length;
+  const tax = taxesOn(inPeriod, P.tax);
+  const afterTax = T.net - tax.total;
+  const rateNow = rateOn(P.tax, isoDate());
+  const untaxed = inPeriod.filter((t) => t.type === 'revenue').reduce((a, t) => a + t.amount, 0) - tax.gross;
   const kpis = [
     { label: 'Revenue', value: m(T.rev), sub: `${revCount} ${revCount === 1 ? 'payment' : 'payments'} received`, color: 'var(--muted)', dot: 'var(--c-rev)' },
     { label: 'Expenses', value: m(T.charges), sub: T.rev ? `${pct((T.charges / T.rev) * 100)} of revenue` : 'No revenue in this period', color: 'var(--muted)', dot: 'var(--c-exp)' },
     { label: 'Net profit', value: m(T.net), sub: T.rev ? `Net margin ${pct(T.netRate)}` : '—', color: T.rev ? tone(T.net) : 'var(--muted)', dot: 'var(--c-pos)' },
+    { label: 'After taxes', value: m(afterTax), sub: tax.total ? `${m(tax.total)} of URSSAF & tax` : 'No taxable revenue', color: 'var(--muted)', dot: 'var(--c-pos)' },
     { label: 'To collect', value: m(toCollect), sub: unpaid.length ? `${unpaid.length} unpaid${late ? ` · ${late} late` : ''}` : 'All invoices paid', color: late ? 'var(--red)' : 'var(--muted)', dot: 'var(--c-warn)' },
     { label: 'Fixed costs / month', value: m(fixedCost), sub: `${subCount} active ${subCount === 1 ? 'subscription' : 'subscriptions'}${fixedRev ? ` · recurring income ${m(fixedRev)}` : ''}`, color: 'var(--muted)', dot: 'var(--c-warn)' },
   ];
@@ -218,6 +225,58 @@ export default function FinancesPage({ data, update, openProject }: { data: AppD
             {insights.map((i) => (
               <div className="insight" key={i.text}><span className="dot" style={{ background: i.dot }} /><span style={{ textWrap: 'pretty' }}>{i.text}</span></div>
             ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid-2 stretch">
+        <div className="card" style={{ gap: '0.875rem' }}>
+          <div className="head">
+            <div>
+              <div className="card-title">Taxes &amp; contributions</div>
+              <div className="small">Micro-entreprise, on business revenue of the period · {rateNow.acre ? `ACRE until ${fmtDate(P.tax.acreUntil)}` : 'normal rates'}</div>
+            </div>
+            <button className="pill" style={{ background: 'var(--chip)', color: 'var(--ink-2)' }} onClick={goToData} title="Edit the rates in Data & profile">
+              {pct(rateNow.total)} today
+            </button>
+          </div>
+          <div className="tax-grid">
+            <div className="tax-row"><span>Gross revenue (taxable)</span><b>{m(tax.gross)}</b></div>
+            <div className="tax-row sub"><span>Social contributions (URSSAF) · {pct(rateNow.social)}</span><span>− {m(tax.social)}</span></div>
+            <div className="tax-row sub"><span>Training contribution (CFP) · {pct(rateNow.cfp)}</span><span>− {m(tax.cfp)}</span></div>
+            {P.tax.vl > 0 && <div className="tax-row sub"><span>Income tax, versement libératoire · {pct(rateNow.vl)}</span><span>− {m(tax.vl)}</span></div>}
+            <div className="tax-row total"><span>Net income</span><b>{m(tax.net)}</b></div>
+          </div>
+          {tax.gross > 0 && (
+            <div className="tax-split" aria-hidden="true">
+              <span style={{ flexGrow: tax.net, background: 'var(--c-pos)' }} />
+              <span style={{ flexGrow: tax.social, background: 'var(--c-warn)' }} />
+              <span style={{ flexGrow: tax.cfp + tax.vl, background: 'var(--c-neg)' }} />
+            </div>
+          )}
+          <div className="small">
+            {untaxed > 0 ? `${m(untaxed)} of trading, investment or rental income is not counted here. ` : ''}
+            Estimate on revenue dated in the period. URSSAF counts money when it is cashed in.
+          </div>
+        </div>
+
+        <div className="card" style={{ gap: '1rem' }}>
+          <div className="head">
+            <div className="card-title">Money by type</div>
+            <div className="small">{periodLabel}</div>
+          </div>
+          <HBars
+            format={m}
+            items={[
+              { id: 'revenue', label: 'Revenue', value: T.rev, color: 'var(--c-rev)', sub: `${revCount} ${revCount === 1 ? 'line' : 'lines'}` },
+              { id: 'direct', label: 'Direct costs', value: T.direct, color: 'var(--c-direct)', sub: T.rev ? `${pct((T.direct / T.rev) * 100)} of revenue` : undefined },
+              { id: 'opex', label: 'Operating expenses', value: T.opex, color: 'var(--c-exp)', sub: T.rev ? `${pct((T.opex / T.rev) * 100)} of revenue` : undefined },
+            ]}
+          />
+          <div className="type-net">
+            <span>What's left</span>
+            <b style={{ color: T.net < 0 ? 'var(--red)' : undefined }}>{m(T.net)}</b>
+            <span className="small">{m(afterTax)} after taxes</span>
           </div>
         </div>
       </div>

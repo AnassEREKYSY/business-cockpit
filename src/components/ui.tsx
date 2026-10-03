@@ -197,3 +197,17 @@ export const IconPlus = ({ size = 14 }: { size?: number }) => (
 export const IconArrow = ({ size = 14 }: { size?: number }) => (
   <Svg size={size}><path d="M5 12h14M13 6l6 6-6 6" /></Svg>
 );
+
+export const IconClients = () => (
+  <Svg>
+    <circle cx="9" cy="8" r="3.5" />
+    <path d="M2.5 20a6.5 6.5 0 0 1 13 0" />
+    <path d="M16 4.5a3.5 3.5 0 0 1 0 7M18.5 14a6.5 6.5 0 0 1 3 6" />
+  </Svg>
+);
+export const IconWealth = () => (
+  <Svg>
+    <path d="M12 3v9l7.8 4.5" />
+    <circle cx="12" cy="12" r="9" />
+  </Svg>
+);

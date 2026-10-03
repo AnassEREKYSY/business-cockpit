@@ -21,6 +21,45 @@ export interface Profile {
   investName: string;
   /** Monthly revenue goal shown on the Overview, 0 = none. */
   revenueGoal: number;
+  /** Micro-entreprise rates used to estimate taxes on revenue. */
+  tax: TaxSettings;
+  /** Wealth settings: fallback exchange rates (1 EUR = x). */
+  wealth: WealthSettings;
+}
+
+export type TaxActivity = 'bic_services' | 'bnc' | 'bic_sales' | 'custom';
+
+/** Micro-entreprise contributions, as % of revenue. ACRE applies up to and including acreUntil. */
+export interface TaxSettings {
+  activity: TaxActivity;
+  /** Business start date ('' = unknown). */
+  start: string;
+  /** Last day of the ACRE period ('' = no ACRE). */
+  acreUntil: string;
+  /** Social contributions, normal rate. */
+  social: number;
+  /** Social contributions during ACRE. */
+  acre: number;
+  /** Contribution à la formation professionnelle. */
+  cfp: number;
+  /** Versement libératoire de l'impôt sur le revenu (0 = not chosen). */
+  vl: number;
+}
+
+export interface WealthSettings {
+  /** Fallback rates, 1 EUR = x MAD / x USD, used when live rates can't be loaded. */
+  eurMad: number;
+  eurUsd: number;
+}
+
+/** A person at a client company. */
+export interface Contact {
+  id: string;
+  name: string;
+  role: string;
+  email: string;
+  phone: string;
+  notes: string;
 }
 
 /** Money put into the S&P 500 ETF on a given day. */
@@ -39,6 +78,8 @@ export interface Client {
   id: string;
   name: string;
   color: string;
+  notes: string;
+  contacts: Contact[];
 }
 
 export interface Project {
@@ -126,6 +167,8 @@ export interface Entry {
   paid: boolean;
   /** Revenue only: when the invoice is due ('' = no due date). */
   due: string;
+  /** Client paid by / paying, when not given by the project ('' = none). */
+  clientId: string;
 }
 
 /** Subscription, retainer or fixed contractor fee that repeats until stopped. */
@@ -139,6 +182,7 @@ export interface Recurring {
   start: string;
   end: string;
   projectId: string;
+  clientId: string;
 }
 
 export interface AppData {
@@ -151,6 +195,78 @@ export interface AppData {
   notes: Note[];
   investments: Investment[];
   timeEntries: TimeEntry[];
+  assets: Asset[];
+  trades: Trade[];
+  assetPrices: AssetPrice[];
+  properties: Property[];
+  propertyEntries: PropertyEntry[];
+}
+
+export type AccountKey = 'tr' | 'ma' | 'other';
+export type AssetKind = 'etf' | 'stock' | 'crypto' | 'opcvm' | 'bond' | 'cash' | 'other';
+
+/** Something held in an investment account. */
+export interface Asset {
+  id: string;
+  account: AccountKey;
+  name: string;
+  /** Market symbol for live prices (Yahoo Finance, e.g. VWCE.DE, BTC-EUR); '' = price typed by hand. */
+  symbol: string;
+  isin: string;
+  kind: AssetKind;
+  currency: string;
+  /** Last known price per unit (typed, or saved from the live feed). */
+  price: number;
+  priceAt: string;
+  position: number;
+}
+
+/** A buy, a sell, or a dividend (quantity 0, price = amount received). */
+export interface Trade {
+  id: string;
+  assetId: string;
+  date: string;
+  side: 'buy' | 'sell' | 'dividend';
+  quantity: number;
+  price: number;
+  fees: number;
+}
+
+/** A price typed by hand on a given day (Moroccan stocks, OPCVM): the history of manual prices. */
+export interface AssetPrice {
+  id: string;
+  assetId: string;
+  date: string;
+  price: number;
+}
+
+/** A real estate investment. Amounts per month unless stated. */
+export interface Property {
+  id: string;
+  name: string;
+  city: string;
+  currency: string;
+  purchaseDate: string;
+  purchasePrice: number;
+  /** Estimated current value. */
+  value: number;
+  /** Loan principal still owed. */
+  debt: number;
+  rent: number;
+  charges: number;
+  loan: number;
+  notes: string;
+  position: number;
+}
+
+/** Money in or out for a property in a given month. */
+export interface PropertyEntry {
+  id: string;
+  propertyId: string;
+  date: string;
+  kind: 'rent' | 'expense' | 'loan';
+  amount: number;
+  label: string;
 }
 
 /** A transaction as the finance views see it: either typed in, or generated from a recurring item. */

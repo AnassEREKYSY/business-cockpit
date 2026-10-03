@@ -1,18 +1,21 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ColorPicker } from '../components/ColorPicker';
 import { EntryModal, FREQ_OPTIONS, RecurringModal, TYPE_OPTIONS, catOptions } from '../components/MoneyForms';
 import { useConfirm } from '../components/Confirm';
 import { useToast } from '../components/Toast';
+import { ClientModal } from '../components/ClientModal';
 import { isOverdue } from '../lib/stats';
+import { TAX_PRESETS, acreEnd, isTaxable, rateOn, taxOf, taxesOn } from '../lib/tax';
+import type { TaxSettings } from '../types';
 import { removeClient, removeRow } from '../lib/undo';
 import { DatePicker } from '../components/Calendar';
-import { ProjectSelect } from '../components/pickers';
+import { ClientSelect, ProjectSelect } from '../components/pickers';
 import { Select } from '../components/Select';
 import { Avatar, Field, IconPencil, Seg } from '../components/ui';
 import { nextColor } from '../lib/colors';
 import { CATEGORIES, CURRENCIES, LOCALE, TYPE_META, catLabel, soft } from '../lib/constants';
-import { isActive, isFuture, monthlyEquivalent, parseAmount } from '../lib/finance';
-import { fmtDate, isoDate, money, uid } from '../lib/format';
+import { allTxns, isActive, isFuture, monthlyEquivalent, parseAmount } from '../lib/finance';
+import { fmtDate, isoDate, money, pct, uid } from '../lib/format';
 import { demoData, isDay, normalize } from '../lib/store';
 import type { Account } from '../App';
 import type { AppData, Client, Entry, EntryType, Recurring } from '../types';
@@ -20,10 +23,10 @@ import type { AppData, Client, Entry, EntryType, Recurring } from '../types';
 type Update = (fn: (d: AppData) => AppData) => void;
 
 const emptyEntry = (): Omit<Entry, 'id' | 'amount'> & { amount: string } => ({
-  date: isoDate(), label: '', type: 'revenue', category: CATEGORIES.revenue[0], amount: '', projectId: '', paid: true, due: '',
+  date: isoDate(), label: '', type: 'revenue', category: CATEGORIES.revenue[0], amount: '', projectId: '', paid: true, due: '', clientId: '',
 });
 const emptyRec = (): Omit<Recurring, 'id' | 'amount'> & { amount: string } => ({
-  label: '', type: 'opex', category: 'Software & SaaS', amount: '', frequency: 'monthly', start: isoDate(), end: '', projectId: '',
+  label: '', type: 'opex', category: 'Software & SaaS', amount: '', frequency: 'monthly', start: isoDate(), end: '', projectId: '', clientId: '',
 });
 
 const CURRENCY_OPTIONS = CURRENCIES.map((c) => ({ value: c.v, label: c.l }));
@@ -33,6 +36,7 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
   const P = data.profile;
   const m = (n: number) => money(n, P.currency);
   const projectName = (id: string) => data.projects.find((p) => p.id === id)?.name ?? '';
+  const clientName = (id: string) => data.clients.find((c) => c.id === id)?.name ?? '';
 
   const [ef, setEf] = useState(emptyEntry);
   const [rf, setRf] = useState(emptyRec);
@@ -61,8 +65,9 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
     const label = ef.label.trim() || catLabel(ef.category);
     const id = uid();
     const revenue = ef.type === 'revenue';
-    update((d) => ({ ...d, entries: [...d.entries, { id, ...ef, label, amount, paid: !revenue || ef.paid, due: revenue && !ef.paid ? ef.due : '' }] }));
-    setEf({ ...emptyEntry(), type: ef.type, category: ef.category, date: ef.date, projectId: ef.projectId });
+    const clientId = ef.clientId && ef.clientId !== data.projects.find((p) => p.id === ef.projectId)?.clientId ? ef.clientId : '';
+    update((d) => ({ ...d, entries: [...d.entries, { id, ...ef, clientId, label, amount, paid: !revenue || ef.paid, due: revenue && !ef.paid ? ef.due : '' }] }));
+    setEf({ ...emptyEntry(), type: ef.type, category: ef.category, date: ef.date, projectId: ef.projectId, clientId: ef.clientId });
     toast(<>{TYPE_META[ef.type].label} <b>{label}</b> added: {m(amount)}{revenue && !ef.paid ? ' (unpaid)' : ''}</>, {
       undo: () => update((d) => ({ ...d, entries: d.entries.filter((x) => x.id !== id) })),
     });
@@ -210,7 +215,7 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
                 className="input"
                 inputMode="decimal"
                 value={goal}
-                placeholder="Optional, shown on the Overview"
+                placeholder="Optional"
                 onChange={(e) => setGoal(e.target.value)}
                 onBlur={(e) => saveGoal(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
@@ -236,6 +241,9 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
             <Field label="Project (optional)">
               <ProjectSelect projects={openProjects} clients={data.clients} value={ef.projectId} onChange={(projectId) => setEf({ ...ef, projectId })} />
             </Field>
+            <Field label="Client (optional)">
+              <ClientSelect data={data} update={update} value={ef.clientId} onChange={(clientId) => setEf({ ...ef, clientId })} inherited={data.clients.find((c) => c.id === data.projects.find((p) => p.id === ef.projectId)?.clientId)} />
+            </Field>
             <Field label={`Amount excl. tax (${P.currency})`}><input className="input" inputMode="decimal" value={ef.amount} onChange={(e) => setEf({ ...ef, amount: e.target.value })} placeholder="0" /></Field>
             {ef.type === 'revenue' && (
               <Field label="Payment">
@@ -252,6 +260,8 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
           {ef.amount.trim() && !efAmount && <div className="small" style={{ color: 'var(--red)' }}>{badAmount}</div>}
         </div>
       </div>
+
+      <TaxCard tax={P.tax} currency={P.currency} data={data} onChange={(tax) => update((d) => ({ ...d, profile: { ...d.profile, tax } }))} />
 
       <Clients data={data} update={update} />
 
@@ -324,20 +334,33 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
 
       <div className="card" style={{ gap: '0.875rem' }}>
         <div className="head">
-          <div className="card-title">Logged transactions <span className="small" style={{ fontWeight: 500 }}>{data.entries.length}</span></div>
+          <div>
+            <div className="card-title">Logged transactions <span className="small" style={{ fontWeight: 500 }}>{data.entries.length}</span></div>
+            <div className="small">Click a line to edit it. Revenue shows its gross amount, with the net after taxes below.</div>
+          </div>
           <div className="row" style={{ gap: '0.5rem' }}>
             <Seg label="Filter by type" value={txFilter} onChange={setTxFilter} options={[['all', 'All'], ['revenue', 'Revenue'], ['direct', 'Direct'], ['opex', 'Operating']]} />
           </div>
         </div>
         <div className="table-wrap scroll">
-          <div className="trow th t-entries"><span>Date</span><span>Label</span><span>Type</span><span>Category</span><span>Project</span><span>Status</span><span className="r">Amount</span><span /></div>
+          <div className="trow th t-entries"><span>Date</span><span>Label</span><span>Type</span><span>Category</span><span>Client · project</span><span>Status</span><span className="r">Amount</span><span /></div>
           {entries.map((e) => (
-            <div className="trow t-entries" key={e.id}>
+            <div
+              className="trow t-entries t-edit"
+              key={e.id}
+              role="button"
+              tabIndex={0}
+              onClick={(ev) => !(ev.target as HTMLElement).closest('button') && setEditingEntry(e)}
+              onKeyDown={(ev) => ev.target === ev.currentTarget && (ev.key === 'Enter' || ev.key === ' ') && (ev.preventDefault(), setEditingEntry(e))}
+              title="Edit this transaction"
+            >
               <span style={{ color: 'var(--muted)' }}>{fmtDate(e.date, true)}{e.date.slice(0, 4) !== String(new Date().getFullYear()) ? ` ${e.date.slice(0, 4)}` : ''}</span>
               <span className="ellipsis" style={{ fontWeight: 600 }}>{e.label}</span>
               <span className="tag" style={{ justifySelf: 'start', background: TYPE_META[e.type].bg, color: TYPE_META[e.type].color }}>{TYPE_META[e.type].short}</span>
               <span className="ellipsis" style={{ color: 'var(--ink-2)' }}>{catLabel(e.category)}</span>
-              <span className="ellipsis" style={{ color: 'var(--muted)' }}>{projectName(e.projectId) || '—'}</span>
+              <span className="ellipsis" style={{ color: 'var(--muted)' }}>
+                {[clientName(e.clientId || data.projects.find((p) => p.id === e.projectId)?.clientId || ''), projectName(e.projectId)].filter(Boolean).join(' · ') || '—'}
+              </span>
               {e.type === 'revenue' ? (
                 <button
                   className={'pay-chip' + (e.paid ? ' paid' : isOverdue(e) ? ' late' : ' waiting')}
@@ -347,7 +370,10 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
                   {e.paid ? 'Paid' : isOverdue(e) ? 'Late' : 'Waiting'}
                 </button>
               ) : <span className="small">—</span>}
-              <b className="r" style={{ color: e.type === 'revenue' ? 'var(--green)' : 'var(--ink)' }}>{e.type === 'revenue' ? '+ ' : '− '}{m(e.amount)}</b>
+              <span className="r amount-cell">
+                <b style={{ color: e.type === 'revenue' ? 'var(--green)' : 'var(--ink)' }}>{e.type === 'revenue' ? '+ ' : '− '}{m(e.amount)}</b>
+                {isTaxable(e) && <span className="small">net {m(e.amount - taxOf(e, P.tax))}</span>}
+              </span>
               <span className="row-actions">
                 <button className="icon-btn" onClick={() => setEditingEntry(e)} title="Edit" aria-label={`Edit ${e.label}`}><IconPencil /></button>
                 <button className="icon-btn danger" title="Delete" aria-label={`Delete ${e.label}`} onClick={() => removeEntry(e)}>
@@ -384,12 +410,114 @@ export default function DataPage({ data, update, account }: { data: AppData; upd
   );
 }
 
+/* ---------------- Taxes ---------------- */
+
+const ACTIVITY_OPTIONS = [
+  ...(Object.keys(TAX_PRESETS) as (keyof typeof TAX_PRESETS)[]).map((k) => ({ value: k as TaxSettings['activity'], label: TAX_PRESETS[k].label })),
+  { value: 'custom' as const, label: 'Custom rates' },
+];
+
+function RateInput({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  const [raw, setRaw] = useState(String(value));
+  useEffect(() => setRaw(String(value)), [value]);
+  return (
+    <Field label={label}>
+      <span className="pct-input">
+        <input
+          className="input"
+          inputMode="decimal"
+          value={raw}
+          onChange={(e) => setRaw(e.target.value)}
+          onBlur={() => {
+            const n = Number(raw.replace(',', '.'));
+            if (Number.isFinite(n) && n >= 0 && n <= 100) onChange(Math.round(n * 1000) / 1000);
+            else setRaw(String(value));
+          }}
+          onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+        />
+        <span>%</span>
+      </span>
+    </Field>
+  );
+}
+
+function TaxCard({ tax, currency, data, onChange }: { tax: TaxSettings; currency: string; data: AppData; onChange: (t: TaxSettings) => void }) {
+  const today = isoDate();
+  const now = rateOn(tax, today);
+  const after = { ...tax, acreUntil: '' };
+  const later = rateOn(after, today);
+  const year = String(new Date().getFullYear());
+  const yearTax = taxesOn(allTxns(data).filter((e) => e.date.startsWith(year)), tax);
+  const set = (patch: Partial<TaxSettings>) => onChange({ ...tax, ...patch, activity: patch.activity ?? ('social' in patch || 'acre' in patch || 'cfp' in patch || 'vl' in patch ? 'custom' : tax.activity) });
+  const pickActivity = (activity: TaxSettings['activity']) => {
+    if (activity === 'custom') return onChange({ ...tax, activity });
+    const p = TAX_PRESETS[activity];
+    onChange({ ...tax, activity, social: p.social, acre: p.acre, cfp: p.cfp, vl: tax.vl ? p.vl : 0 });
+  };
+  return (
+    <div className="card" style={{ gap: '0.875rem' }}>
+      <div className="head">
+        <div>
+          <div className="card-title">Taxes · micro-entreprise</div>
+          <div className="small">Used to show gross and net revenue everywhere. Rates are 2026 values: check them each January, and when ACRE ends.</div>
+        </div>
+        <div className="tax-now">
+          <span className="small">Today</span>
+          <b>{pct(now.total)}</b>
+          {now.acre ? <span className="pay-chip waiting">ACRE</span> : null}
+        </div>
+      </div>
+      <div className="form-grid">
+        <Field label="Activity">
+          <Select value={tax.activity} onChange={pickActivity} options={ACTIVITY_OPTIONS} ariaLabel="Activity" />
+        </Field>
+        <Field label="Business started">
+          <DatePicker value={tax.start} onChange={(start) => onChange({ ...tax, start, acreUntil: tax.acreUntil ? acreEnd(start) || tax.acreUntil : '' })} placeholder="Unknown" ariaLabel="Business started" />
+        </Field>
+        <Field label="ACRE until">
+          <DatePicker value={tax.acreUntil} onChange={(acreUntil) => onChange({ ...tax, acreUntil })} placeholder="No ACRE" ariaLabel="ACRE until" />
+        </Field>
+        <Field label="Versement libératoire">
+          <Seg label="Versement libératoire" value={tax.vl > 0 ? 'yes' : 'no'} onChange={(v) => set({ vl: v === 'yes' ? (tax.activity !== 'custom' ? TAX_PRESETS[tax.activity].vl : 1.7) : 0, activity: tax.activity })} options={[['yes', 'Yes'], ['no', 'No']]} />
+        </Field>
+      </div>
+      <div className="form-grid">
+        <RateInput label="Social contributions" value={tax.social} onChange={(social) => set({ social })} />
+        <RateInput label="Social, during ACRE" value={tax.acre} onChange={(acre) => set({ acre })} />
+        <RateInput label="Training (CFP)" value={tax.cfp} onChange={(cfp) => set({ cfp })} />
+        <RateInput label="Income tax (VL)" value={tax.vl} onChange={(vl) => set({ vl })} />
+      </div>
+      <div className="tax-summary">
+        <div>
+          <span className="small">{now.acre ? `Now, with ACRE (until ${fmtDate(tax.acreUntil)})` : 'Now'}</span>
+          <b>{pct(now.total)}</b>
+          <span className="small">{pct(now.social)} URSSAF + {pct(now.cfp)} CFP{tax.vl ? ` + ${pct(now.vl)} income tax` : ''}</span>
+        </div>
+        {now.acre && (
+          <div>
+            <span className="small">After ACRE</span>
+            <b>{pct(later.total)}</b>
+            <span className="small">{pct(later.social)} URSSAF + {pct(later.cfp)} CFP{tax.vl ? ` + ${pct(later.vl)} income tax` : ''}</span>
+          </div>
+        )}
+        <div>
+          <span className="small">This year so far</span>
+          <b>{money(yearTax.total, currency)}</b>
+          <span className="small">on {money(yearTax.gross, currency)} gross · {money(yearTax.net, currency)} net</span>
+        </div>
+      </div>
+      <div className="small">Trading, investment and real estate income are not business turnover: no contributions are counted on them.</div>
+    </div>
+  );
+}
+
 /* ---------------- Clients ---------------- */
 
 function Clients({ data, update }: { data: AppData; update: Update }) {
   const [name, setName] = useState('');
   const [color, setColor] = useState(() => nextColor(data.clients.map((c) => c.color)));
   const [dup, setDup] = useState('');
+  const [details, setDetails] = useState<Client | null>(null);
   const confirm = useConfirm();
   const toast = useToast();
 
@@ -409,7 +537,7 @@ function Clients({ data, update }: { data: AppData; update: Update }) {
       setDup(`"${existing.name}" already exists. Change its colour with its dot below.`);
       return;
     }
-    update((d) => ({ ...d, clients: [...d.clients, { id: uid(), name: n, color }].sort((a, b) => a.name.localeCompare(b.name, LOCALE)) }));
+    update((d) => ({ ...d, clients: [...d.clients, { id: uid(), name: n, color, notes: '', contacts: [] }].sort((a, b) => a.name.localeCompare(b.name, LOCALE)) }));
     setDup('');
     setName('');
     setColor(nextColor([...data.clients.map((c) => c.color), color]));
@@ -465,12 +593,14 @@ function Clients({ data, update }: { data: AppData; update: Update }) {
                   onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
                 />
                 <span className="client-use">{plural(u.projects, 'project')} · {plural(u.tasks, 'task')}</span>
+                <button className="btn sm ghost" onClick={() => setDetails(c)} title="Notes and contacts">{c.contacts.length ? plural(c.contacts.length, 'contact') : 'Contacts'}</button>
                 <button className="x" onClick={() => void remove(c)} aria-label={`Delete ${c.name}`}>×</button>
               </div>
             );
           })}
         </div>
       )}
+      {details && <ClientModal client={details} update={update} onClose={() => setDetails(null)} />}
     </div>
   );
 }

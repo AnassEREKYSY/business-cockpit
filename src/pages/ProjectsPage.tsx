@@ -4,6 +4,7 @@ import { ClientChip } from '../components/pickers';
 import { Select } from '../components/Select';
 import { IconPencil, IconPlay, IconStop, Seg } from '../components/ui';
 import { useToast } from '../components/Toast';
+import { ClientModal, ContactList } from '../components/ClientModal';
 import { allTxns } from '../lib/finance';
 import { projectStats } from '../lib/stats';
 import { entryMinutes, fmtClock, fmtDuration, parseDuration, runningEntry, startTimer, stopTimers, sumMinutes, useNow, weekStart } from '../lib/time';
@@ -126,6 +127,7 @@ function ProjectList({ data, update, openProject }: Props) {
 
 function ProjectView({ data, update, project: p, back }: Props & { project: Project }) {
   const [editing, setEditing] = useState(false);
+  const [editingClient, setEditingClient] = useState(false);
   const toast = useToast();
   const client = data.clients.find((c) => c.id === p.clientId);
   const tasks = data.tasks.filter((t) => t.projectId === p.id);
@@ -216,6 +218,19 @@ function ProjectView({ data, update, project: p, back }: Props & { project: Proj
         </div>
       </div>
 
+      {client && (
+        <div className="card client-card" style={{ borderLeftColor: client.color }}>
+          <div className="head">
+            <div>
+              <div className="card-title">{client.name} <span className="small" style={{ fontWeight: 500 }}>· {client.contacts.length} {client.contacts.length === 1 ? 'contact' : 'contacts'}</span></div>
+              {client.notes ? <div className="small client-notes">{client.notes}</div> : <div className="small">Client notes and contacts, shared by all of {client.name}'s projects.</div>}
+            </div>
+            <button className="btn sm outline" onClick={() => setEditingClient(true)}><IconPencil /> Edit client</button>
+          </div>
+          <ContactList client={client} onEdit={() => setEditingClient(true)} />
+        </div>
+      )}
+
       <div className="pgrid">
         <Brief project={p} update={update} />
         <Journal project={p} notes={data.notes} update={update} />
@@ -224,6 +239,7 @@ function ProjectView({ data, update, project: p, back }: Props & { project: Proj
       <TimeLog data={data} project={p} update={update} now={now} />
 
       {editing && <ProjectModal project={p} data={data} update={update} onClose={() => setEditing(false)} onDeleted={back} />}
+      {editingClient && client && <ClientModal client={client} update={update} onClose={() => setEditingClient(false)} />}
     </section>
   );
 }

@@ -33,6 +33,7 @@ export function expandRecurring(items: Recurring[], today = new Date()): Txn[] {
           category: r.category,
           amount: Number(r.amount),
           projectId: r.projectId,
+          clientId: r.clientId,
         });
       }
       m += 1;

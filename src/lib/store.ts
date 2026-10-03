@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { AppData, CheckItem, Client, Entry, Investment, Note, Priority, Recurring, Task, TimeEntry } from '../types';
+import type { AppData, Asset, AssetPrice, CheckItem, Client, Contact, Entry, Investment, Note, Priority, Property, PropertyEntry, Recurring, Task, TaxSettings, TimeEntry, Trade } from '../types';
+import { DEFAULT_TAX } from './tax';
 import { isHex, nextColor } from './colors';
 import { COLUMNS, LOCALE, NOTE_KINDS, PROJECT_STATUSES, catLabel } from './constants';
 import { isoDate, monthsAgo, uid } from './format';
@@ -65,7 +66,7 @@ export const localRepository: Repository = {
 
 export function emptyData(): AppData {
   return {
-    profile: { name: '', email: '', company: '', currency: 'EUR', targetPct: 30, alertPct: 12, avatar: '', investIsin: '', investMic: '', investName: '', revenueGoal: 0 },
+    profile: { name: '', email: '', company: '', currency: 'EUR', targetPct: 30, alertPct: 12, avatar: '', investIsin: '', investMic: '', investName: '', revenueGoal: 0, tax: { ...DEFAULT_TAX }, wealth: { eurMad: 10.8, eurUsd: 1.08 } },
     clients: [],
     projects: [],
     tasks: [],
@@ -74,6 +75,11 @@ export function emptyData(): AppData {
     notes: [],
     investments: [],
     timeEntries: [],
+    assets: [],
+    trades: [],
+    assetPrices: [],
+    properties: [],
+    propertyEntries: [],
   };
 }
 
@@ -98,6 +104,38 @@ const TYPES = ['revenue', 'direct', 'opex'];
 const COLS = COLUMNS.map((c) => c.key as string);
 const idOf = (v: unknown) => (typeof v === 'string' && UUID.test(v) ? v : uid());
 const PRIORITIES: Priority[] = ['none', 'low', 'medium', 'high'];
+const num = (v: unknown, max = 1e12) => {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? Math.min(max, n) : 0;
+};
+const rate = (v: unknown, fallback: number) => {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? Math.round(n * 1000) / 1000 : fallback;
+};
+const TAX_ACTIVITIES = ['bic_services', 'bnc', 'bic_sales', 'custom'];
+/** Tax settings with a fixed key order (the sync compares them as JSON). */
+function taxSettings(v: unknown): TaxSettings {
+  const t = (v && typeof v === 'object' ? v : {}) as Partial<TaxSettings>;
+  const d = DEFAULT_TAX;
+  return {
+    activity: TAX_ACTIVITIES.includes(t.activity as string) ? (t.activity as TaxSettings['activity']) : d.activity,
+    start: t.start === '' ? '' : isDay(t.start) ? t.start : d.start,
+    acreUntil: t.acreUntil === '' ? '' : isDay(t.acreUntil) ? t.acreUntil : d.acreUntil,
+    social: rate(t.social, d.social), acre: rate(t.acre, d.acre), cfp: rate(t.cfp, d.cfp), vl: rate(t.vl, d.vl),
+  };
+}
+const contacts = (v: unknown): Contact[] =>
+  (Array.isArray(v) ? v : [])
+    .filter((x) => x && typeof x === 'object')
+    .slice(0, 50)
+    .map((x) => ({
+      id: text((x as Contact).id) || uid(), name: text((x as Contact).name).trim(), role: text((x as Contact).role).trim(),
+      email: text((x as Contact).email).trim(), phone: text((x as Contact).phone).trim(), notes: text((x as Contact).notes),
+    }))
+    .filter((c) => c.name || c.email || c.phone);
+const ACCOUNTS = ['tr', 'ma', 'other'];
+const KINDS = ['etf', 'stock', 'crypto', 'opcvm', 'bond', 'cash', 'other'];
+const CURRENCY = /^[A-Z]{3}$/;
 const isoTime = (v: unknown) => (typeof v === 'string' && v && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : '');
 /** Checklist items, rebuilt with a fixed key order (the sync compares rows as JSON). */
 const checklist = (v: unknown): CheckItem[] =>
@@ -118,7 +156,10 @@ export function normalize(d: Partial<AppData>): AppData {
   for (const c of d.clients ?? []) {
     const name = text(c.name).trim();
     if (!name) continue;
-    clients.push({ id: idOf(c.id), name, color: isHex(c.color) ? c.color.toLowerCase() : nextColor(clients.map((x) => x.color)) });
+    clients.push({
+      id: idOf(c.id), name, color: isHex(c.color) ? c.color.toLowerCase() : nextColor(clients.map((x) => x.color)),
+      notes: text(c.notes), contacts: contacts(c.contacts),
+    });
   }
   // Saves from before clients existed carry the client as free text on each project: turn each
   // distinct name into a client once. Only for that old format, so this never runs twice.
@@ -127,7 +168,7 @@ export function normalize(d: Partial<AppData>): AppData {
     const key = name.trim().toLowerCase();
     let c = clients.find((x) => x.name.toLowerCase() === key);
     if (!c) {
-      c = { id: uid(), name: name.trim(), color: nextColor(clients.map((x) => x.color)) };
+      c = { id: uid(), name: name.trim(), color: nextColor(clients.map((x) => x.color)), notes: '', contacts: [] };
       clients.push(c);
     }
     return c.id;
@@ -163,6 +204,11 @@ export function normalize(d: Partial<AppData>): AppData {
       investMic: /^[A-Z]{4}$/.test(text(p.investMic)) ? text(p.investMic) : '',
       investName: text(p.investName),
       revenueGoal: amount(p.revenueGoal),
+      tax: taxSettings(p.tax),
+      wealth: {
+        eurMad: Number(p.wealth?.eurMad) > 0 ? Number(p.wealth?.eurMad) : 10.8,
+        eurUsd: Number(p.wealth?.eurUsd) > 0 ? Number(p.wealth?.eurUsd) : 1.08,
+      },
     },
     clients,
     projects,
@@ -184,13 +230,14 @@ export function normalize(d: Partial<AppData>): AppData {
         // Older saves have no payment status: they were paid. Only revenue can wait for payment.
         paid: e.type !== 'revenue' || e.paid !== false,
         due: e.type === 'revenue' ? day(e.due) : '',
+        clientId: legacy ? '' : cid(e.clientId),
       })),
     recurring: (d.recurring ?? [])
       .filter((r) => isDay(r.start) && TYPES.includes(r.type))
       .map((r): Recurring => ({
         id: idOf(r.id), label: text(r.label) || catLabel(text(r.category)), type: r.type, category: text(r.category),
         amount: amount(r.amount), frequency: r.frequency === 'yearly' ? 'yearly' : 'monthly', start: r.start,
-        end: day(r.end), projectId: pid(r.projectId),
+        end: day(r.end), projectId: pid(r.projectId), clientId: legacy ? '' : cid(r.clientId),
       })),
     // Notes belong to a project: without one (or without a date) they are dropped.
     notes: (d.notes ?? [])
@@ -208,7 +255,51 @@ export function normalize(d: Partial<AppData>): AppData {
       }))
       .sort((a, b) => a.date.localeCompare(b.date)),
     timeEntries: normTime(d.timeEntries ?? [], pid, new Set((d.tasks ?? []).map((t) => t.id))),
+    ...normWealth(d),
   };
+}
+
+function normWealth(d: Partial<AppData>): Pick<AppData, 'assets' | 'trades' | 'assetPrices' | 'properties' | 'propertyEntries'> {
+  const assets: Asset[] = (d.assets ?? [])
+    .filter((a) => text(a.name).trim())
+    .map((a, i) => ({
+      id: idOf(a.id), account: ACCOUNTS.includes(a.account) ? a.account : 'tr', name: text(a.name).trim(),
+      symbol: text(a.symbol).trim().toUpperCase().slice(0, 32), isin: text(a.isin).trim().toUpperCase().slice(0, 12),
+      kind: KINDS.includes(a.kind) ? a.kind : 'other', currency: CURRENCY.test(text(a.currency)) ? text(a.currency) : 'EUR',
+      price: num(a.price), priceAt: isoTime(a.priceAt),
+      position: Number.isFinite(Number(a.position)) && a.position !== null ? Number(a.position) : i,
+    }))
+    .sort((a, b) => a.position - b.position);
+  const assetIds = new Set(assets.map((a) => a.id));
+  const trades: Trade[] = (d.trades ?? [])
+    .filter((t) => assetIds.has(t.assetId) && isDay(t.date))
+    .map((t) => ({
+      id: idOf(t.id), assetId: t.assetId, date: t.date, side: (t.side === 'sell' || t.side === 'dividend' ? t.side : 'buy') as Trade['side'],
+      quantity: t.side === 'dividend' ? 0 : num(t.quantity), price: num(t.price), fees: amount(t.fees),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+  const assetPrices: AssetPrice[] = (d.assetPrices ?? [])
+    .filter((x) => assetIds.has(x.assetId) && isDay(x.date) && num(x.price) > 0)
+    .map((x) => ({ id: idOf(x.id), assetId: x.assetId, date: x.date, price: num(x.price) }))
+    .sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+  const properties: Property[] = (d.properties ?? [])
+    .filter((x) => text(x.name).trim())
+    .map((x, i) => ({
+      id: idOf(x.id), name: text(x.name).trim(), city: text(x.city).trim(), currency: CURRENCY.test(text(x.currency)) ? text(x.currency) : 'EUR',
+      purchaseDate: day(x.purchaseDate), purchasePrice: amount(x.purchasePrice), value: amount(x.value), debt: amount(x.debt),
+      rent: amount(x.rent), charges: amount(x.charges), loan: amount(x.loan), notes: text(x.notes),
+      position: Number.isFinite(Number(x.position)) && x.position !== null ? Number(x.position) : i,
+    }))
+    .sort((a, b) => a.position - b.position);
+  const propIds = new Set(properties.map((x) => x.id));
+  const propertyEntries: PropertyEntry[] = (d.propertyEntries ?? [])
+    .filter((x) => propIds.has(x.propertyId) && isDay(x.date))
+    .map((x) => ({
+      id: idOf(x.id), propertyId: x.propertyId, date: x.date, kind: (x.kind === 'expense' || x.kind === 'loan' ? x.kind : 'rent') as PropertyEntry['kind'],
+      amount: amount(x.amount), label: text(x.label),
+    }))
+    .sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
+  return { assets, trades, assetPrices, properties, propertyEntries };
 }
 
 function normTime(list: TimeEntry[], pid: (v: unknown) => string, taskIds: Set<string>): TimeEntry[] {
@@ -221,6 +312,48 @@ function normTime(list: TimeEntry[], pid: (v: unknown) => string, taskIds: Set<s
       note: text(x.note), startedAt: isoTime(x.startedAt),
     }))
     .sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
+}
+
+/** Example portfolios and one rental, for the demo. */
+function demoWealth(m: (off: number, day: number) => string): Pick<AppData, 'assets' | 'trades' | 'assetPrices' | 'properties' | 'propertyEntries'> {
+  const [vwce, btc, apple, atw, iam, cdg] = [uid(), uid(), uid(), uid(), uid(), uid()];
+  const now = new Date().toISOString();
+  const assets: Asset[] = [
+    { id: vwce, account: 'tr', name: 'Vanguard FTSE All-World (Acc)', symbol: 'VWCE.DE', isin: 'IE00BK5BQT80', kind: 'etf', currency: 'EUR', price: 142.6, priceAt: now, position: 0 },
+    { id: btc, account: 'tr', name: 'Bitcoin', symbol: 'BTC-EUR', isin: '', kind: 'crypto', currency: 'EUR', price: 61200, priceAt: now, position: 1 },
+    { id: apple, account: 'tr', name: 'Apple', symbol: 'APC.DE', isin: 'US0378331005', kind: 'stock', currency: 'EUR', price: 214.3, priceAt: now, position: 2 },
+    { id: atw, account: 'ma', name: 'Attijariwafa Bank', symbol: '', isin: 'MA0000012445', kind: 'stock', currency: 'MAD', price: 690, priceAt: now, position: 3 },
+    { id: iam, account: 'ma', name: 'Maroc Telecom', symbol: '', isin: 'MA0000011488', kind: 'stock', currency: 'MAD', price: 112, priceAt: now, position: 4 },
+    { id: cdg, account: 'ma', name: 'OPCVM actions (exemple)', symbol: '', isin: '', kind: 'opcvm', currency: 'MAD', price: 1640, priceAt: now, position: 5 },
+  ];
+  const trades: Trade[] = [];
+  const t = (assetId: string, date: string, side: Trade['side'], quantity: number, price: number, fees = 1) =>
+    trades.push({ id: uid(), assetId, date, side, quantity, price, fees });
+  [118, 121, 126, 124, 131, 137].forEach((p, i) => t(vwce, m(5 - i, 2), 'buy', 4, p));
+  t(btc, m(5, 10), 'buy', 0.02, 52000);
+  t(btc, m(2, 10), 'buy', 0.01, 58500);
+  t(apple, m(4, 15), 'buy', 5, 188);
+  t(apple, m(1, 15), 'dividend', 0, 1.2, 0);
+  t(atw, m(5, 5), 'buy', 20, 610, 15);
+  t(iam, m(4, 5), 'buy', 80, 98, 12);
+  t(cdg, m(5, 20), 'buy', 6, 1480, 0);
+  t(cdg, m(2, 20), 'buy', 3, 1555, 0);
+  const assetPrices: AssetPrice[] = [
+    ...[620, 641, 655, 668, 690].map((p, i) => ({ id: uid(), assetId: atw, date: m(4 - i, 28), price: p })),
+    ...[101, 99, 104, 108, 112].map((p, i) => ({ id: uid(), assetId: iam, date: m(4 - i, 28), price: p })),
+    ...[1500, 1530, 1560, 1601, 1640].map((p, i) => ({ id: uid(), assetId: cdg, date: m(4 - i, 28), price: p })),
+  ];
+  const home = uid();
+  const properties: Property[] = [
+    { id: home, name: 'Apartment Maarif', city: 'Casablanca', currency: 'MAD', purchaseDate: '2024-06-01', purchasePrice: 1200000, value: 1320000, debt: 760000, rent: 6500, charges: 650, loan: 5200, notes: 'Two-bedroom, rented unfurnished.', position: 0 },
+  ];
+  const propertyEntries: PropertyEntry[] = [];
+  for (let i = 5; i >= 0; i--) {
+    propertyEntries.push({ id: uid(), propertyId: home, date: m(i, 5), kind: 'rent', amount: 6500, label: 'Rent' });
+    propertyEntries.push({ id: uid(), propertyId: home, date: m(i, 10), kind: 'loan', amount: 5200, label: 'Mortgage' });
+    if (i % 3 === 1) propertyEntries.push({ id: uid(), propertyId: home, date: m(i, 18), kind: 'expense', amount: 1950, label: 'Syndic & repairs' });
+  }
+  return { assets, trades, assetPrices, properties, propertyEntries };
 }
 
 export function demoData(profile: AppData['profile']): AppData {
@@ -240,13 +373,13 @@ export function demoData(profile: AppData['profile']): AppData {
   ];
   rows.forEach(([type, category, label, projectId, vals], ri) =>
     vals.forEach((amount, i) => {
-      if (amount) entries.push({ id: uid(), date: m(5 - i, 3 + ri * 2), label, type, category, amount, projectId, paid: true, due: '' });
+      if (amount) entries.push({ id: uid(), date: m(5 - i, 3 + ri * 2), label, type, category, amount, projectId, paid: true, due: '', clientId: '' });
     }),
   );
   // This month's invoice is still waiting, and one from last month is late.
   const lastInvoice = entries.filter((e) => e.type === 'revenue').at(-1);
   if (lastInvoice) Object.assign(lastInvoice, { paid: false, due: isoDate(new Date(Date.now() + 12 * 86_400_000)) });
-  entries.push({ id: uid(), date: m(1, 20), label: 'Booking app, milestone 2', type: 'revenue', category: 'Services', amount: 2400, projectId: p3, paid: false, due: m(1, 30) > isoDate() ? isoDate(new Date(Date.now() - 4 * 86_400_000)) : m(1, 30) });
+  entries.push({ id: uid(), date: m(1, 20), label: 'Booking app, milestone 2', type: 'revenue', category: 'Services', amount: 2400, projectId: p3, clientId: '', paid: false, due: m(1, 30) > isoDate() ? isoDate(new Date(Date.now() - 4 * 86_400_000)) : m(1, 30) });
   const daysAgo = (n: number) => isoDate(new Date(Date.now() - n * 86_400_000));
   const ck = (items: [string, boolean][]) => items.map(([text, done]) => ({ id: uid(), text, done }));
   const t1 = uid();
@@ -255,10 +388,10 @@ export function demoData(profile: AppData['profile']): AppData {
   return {
     profile,
     clients: [
-      { id: c2, name: 'Northside Studio', color: '#8b6fe8' },
-      { id: c3, name: 'Physio Plus', color: '#22a6c9' },
-      { id: c1, name: 'Hudson Home', color: '#f07a3a' },
-      { id: c4, name: 'Bike & Co', color: '#2fa565' },
+      { id: c2, name: 'Northside Studio', color: '#8b6fe8', notes: '', contacts: [] },
+      { id: c3, name: 'Physio Plus', color: '#22a6c9', notes: '', contacts: [] },
+      { id: c1, name: 'Hudson Home', color: '#f07a3a', notes: '', contacts: [] },
+      { id: c4, name: 'Bike & Co', color: '#2fa565', notes: '', contacts: [] },
     ],
     projects: [
       { id: p1, name: 'E-commerce site redesign', clientId: c1, start: m(2, 4), deadline: m(-1, 15), status: 'In progress' , position: 0, brief: { context: 'Online home decor shop, 800 orders a month.', goal: 'Double the mobile conversion rate.', deliverables: 'Mockups, build, payments, training.', out: 'Product photos and SEO product copy.' }, budget: 48000 },
@@ -280,6 +413,7 @@ export function demoData(profile: AppData['profile']): AppData {
       ...[0, 2, 4, 7, 11].map((n, i) => ({ id: uid(), projectId: p3, taskId: t3, date: daysAgo(n), minutes: [45, 120, 90, 160, 110][i], note: '', startedAt: '' })),
       { id: uid(), projectId: p2, taskId: '', date: daysAgo(1), minutes: 50, note: 'Kick-off call', startedAt: '' },
     ],
+    ...demoWealth(m),
     entries,
     investments: [],
     notes: [
@@ -287,11 +421,11 @@ export function demoData(profile: AppData['profile']): AppData {
       { id: uid(), projectId: p1, date: m(0, 22), kind: 'decision', body: 'Launch v1 without the customer reviews module.', createdAt: '' },
     ],
     recurring: [
-      { id: uid(), label: 'Maintenance retainer', type: 'revenue', category: 'Subscriptions / retainers', amount: 1500, frequency: 'monthly', start, end: '', projectId: p3 },
-      { id: uid(), label: 'Coworking', type: 'opex', category: 'Rent & office', amount: 650, frequency: 'monthly', start, end: '', projectId: '' },
-      { id: uid(), label: 'Google Workspace', type: 'opex', category: 'Software & SaaS', amount: 14, frequency: 'monthly', start, end: '', projectId: '' },
-      { id: uid(), label: 'Figma', type: 'opex', category: 'Software & SaaS', amount: 180, frequency: 'yearly', start, end: '', projectId: '' },
-      { id: uid(), label: 'Business bank account', type: 'opex', category: 'Bank fees', amount: 45, frequency: 'monthly', start, end: '', projectId: '' },
+      { id: uid(), label: 'Maintenance retainer', type: 'revenue', category: 'Subscriptions / retainers', amount: 1500, frequency: 'monthly', start, end: '', projectId: p3, clientId: '' },
+      { id: uid(), label: 'Coworking', type: 'opex', category: 'Rent & office', amount: 650, frequency: 'monthly', start, end: '', projectId: '', clientId: '' },
+      { id: uid(), label: 'Google Workspace', type: 'opex', category: 'Software & SaaS', amount: 14, frequency: 'monthly', start, end: '', projectId: '', clientId: '' },
+      { id: uid(), label: 'Figma', type: 'opex', category: 'Software & SaaS', amount: 180, frequency: 'yearly', start, end: '', projectId: '', clientId: '' },
+      { id: uid(), label: 'Business bank account', type: 'opex', category: 'Bank fees', amount: 45, frequency: 'monthly', start, end: '', projectId: '', clientId: '' },
     ],
   };
 }
@@ -302,7 +436,7 @@ const SAVE_DELAY = 400;
 const RETRY_DELAY = 5000;
 const LOAD_TIMEOUT = 15000;
 
-type Stale = { projects: string[]; clients: string[] };
+type Stale = { projects: string[]; clients: string[]; assets?: string[]; properties?: string[] };
 type Rejection = { message: string; stale: Stale };
 const asRejection = (e: unknown): Rejection | null =>
   e instanceof Error && 'stale' in e ? { message: e.message, stale: (e as { stale: Stale }).stale } : null;
@@ -311,6 +445,8 @@ const asRejection = (e: unknown): Rejection | null =>
 export function pruneParents(d: AppData, stale: Stale): AppData {
   const p = new Set(stale.projects);
   const c = new Set(stale.clients);
+  const a = new Set(stale.assets ?? []);
+  const h = new Set(stale.properties ?? []);
   const unP = <T extends { projectId: string }>(x: T) => (p.has(x.projectId) ? { ...x, projectId: '' } : x);
   const unC = <T extends { clientId: string }>(x: T) => (c.has(x.clientId) ? { ...x, clientId: '' } : x);
   return {
@@ -318,10 +454,15 @@ export function pruneParents(d: AppData, stale: Stale): AppData {
     clients: d.clients.filter((x) => !c.has(x.id)),
     projects: d.projects.filter((x) => !p.has(x.id)).map(unC),
     tasks: d.tasks.map(unP).map(unC),
-    entries: d.entries.map(unP),
-    recurring: d.recurring.map(unP),
+    entries: d.entries.map(unP).map(unC),
+    recurring: d.recurring.map(unP).map(unC),
     notes: d.notes.filter((n) => !p.has(n.projectId)),
     timeEntries: d.timeEntries.map(unP),
+    assets: d.assets.filter((x) => !a.has(x.id)),
+    trades: d.trades.filter((x) => !a.has(x.assetId)),
+    assetPrices: d.assetPrices.filter((x) => !a.has(x.assetId)),
+    properties: d.properties.filter((x) => !h.has(x.id)),
+    propertyEntries: d.propertyEntries.filter((x) => !h.has(x.propertyId)),
   };
 }
 
@@ -361,7 +502,7 @@ export function useAppData(repo: Repository) {
           gen.current += 1;
           if (disposed.current) return;
           const rej = asRejection(err);
-          if (rej && (rej.stale.projects.length || rej.stale.clients.length)) {
+          if (rej && (rej.stale.projects.length || rej.stale.clients.length || rej.stale.assets?.length || rej.stale.properties?.length)) {
             // Deleted on another device: drop them here too; the resulting change saves itself.
             pending.current = null;
             setData((d) => (d ? pruneParents(d, rej.stale) : d));

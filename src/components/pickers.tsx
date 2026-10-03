@@ -41,7 +41,7 @@ export function ClientSelect({ data, update, value, onChange, size, ariaLabel = 
     ...data.clients.map((c) => ({ value: c.id, label: c.name, color: c.color })),
   ];
   const create = (name: string) => {
-    const client: Client = { id: uid(), name, color: nextColor(data.clients.map((c) => c.color)) };
+    const client: Client = { id: uid(), name, color: nextColor(data.clients.map((c) => c.color)), notes: '', contacts: [] };
     update((d) => ({ ...d, clients: [...d.clients, client].sort((a, b) => a.name.localeCompare(b.name, LOCALE)) }));
     return client.id;
   };

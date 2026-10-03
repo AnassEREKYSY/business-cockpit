@@ -6,7 +6,7 @@ import type { AppData } from '../types';
  * meanwhile are kept).
  */
 
-type Rows = 'clients' | 'projects' | 'tasks' | 'entries' | 'recurring' | 'notes' | 'timeEntries';
+type Rows = 'clients' | 'projects' | 'tasks' | 'entries' | 'recurring' | 'notes' | 'timeEntries' | 'assets' | 'trades' | 'assetPrices' | 'properties' | 'propertyEntries';
 type Restore = (d: AppData) => AppData;
 
 /** Add rows back, skipping ids that exist again. */
@@ -70,11 +70,16 @@ export function removeClient(d: AppData, id: string): { data: AppData; restore: 
   if (!client) return { data: d, restore: (x) => x };
   const projects = new Set(d.projects.filter((p) => p.clientId === id).map((p) => p.id));
   const tasks = new Set(d.tasks.filter((t) => t.clientId === id).map((t) => t.id));
+  const entries = new Set(d.entries.filter((t) => t.clientId === id).map((t) => t.id));
+  const recurring = new Set(d.recurring.filter((t) => t.clientId === id).map((t) => t.id));
+  const un = <T extends { clientId: string }>(x: T) => (x.clientId === id ? { ...x, clientId: '' } : x);
   const data: AppData = {
     ...d,
     clients: d.clients.filter((c) => c.id !== id),
-    projects: d.projects.map((p) => (p.clientId === id ? { ...p, clientId: '' } : p)),
-    tasks: d.tasks.map((t) => (t.clientId === id ? { ...t, clientId: '' } : t)),
+    projects: d.projects.map(un),
+    tasks: d.tasks.map(un),
+    entries: d.entries.map(un),
+    recurring: d.recurring.map(un),
   };
   const restore: Restore = (x) => {
     if (x.clients.some((c) => c.id === id)) return x;
@@ -83,7 +88,42 @@ export function removeClient(d: AppData, id: string): { data: AppData; restore: 
       clients: [...x.clients, client].sort((a, b) => a.name.localeCompare(b.name)),
       projects: relink(x.projects, projects, 'clientId', id),
       tasks: relink(x.tasks, tasks, 'clientId', id),
+      entries: relink(x.entries, entries, 'clientId', id),
+      recurring: relink(x.recurring, recurring, 'clientId', id),
     };
+  };
+  return { data, restore };
+}
+
+/** Delete an asset with its trades and price history. */
+export function removeAsset(d: AppData, id: string): { data: AppData; restore: Restore } {
+  const asset = d.assets.find((a) => a.id === id);
+  if (!asset) return { data: d, restore: (x) => x };
+  const trades = d.trades.filter((t) => t.assetId === id);
+  const prices = d.assetPrices.filter((p) => p.assetId === id);
+  const data: AppData = {
+    ...d,
+    assets: d.assets.filter((a) => a.id !== id),
+    trades: d.trades.filter((t) => t.assetId !== id),
+    assetPrices: d.assetPrices.filter((p) => p.assetId !== id),
+  };
+  const restore: Restore = (x) => {
+    if (x.assets.some((a) => a.id === id)) return x;
+    const back = { ...x, assets: [...x.assets, asset].sort((a, b) => a.position - b.position) };
+    return putBack(putBack(back, 'trades', trades), 'assetPrices', prices);
+  };
+  return { data, restore };
+}
+
+/** Delete a property with its monthly entries. */
+export function removeProperty(d: AppData, id: string): { data: AppData; restore: Restore } {
+  const prop = d.properties.find((p) => p.id === id);
+  if (!prop) return { data: d, restore: (x) => x };
+  const entries = d.propertyEntries.filter((e) => e.propertyId === id);
+  const data: AppData = { ...d, properties: d.properties.filter((p) => p.id !== id), propertyEntries: d.propertyEntries.filter((e) => e.propertyId !== id) };
+  const restore: Restore = (x) => {
+    if (x.properties.some((p) => p.id === id)) return x;
+    return putBack({ ...x, properties: [...x.properties, prop].sort((a, b) => a.position - b.position) }, 'propertyEntries', entries);
   };
   return { data, restore };
 }

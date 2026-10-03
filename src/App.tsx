@@ -3,7 +3,7 @@ import { EntryModal, newEntry } from './components/MoneyForms';
 import { Palette, type Command } from './components/Palette';
 import { TaskModal, newTask } from './components/TaskModal';
 import { useToast } from './components/Toast';
-import { Avatar, BrandMark, IconData, IconFinance, IconOverview, IconPlus, IconProjects, IconSearch, IconStop, ThemeMini, ThemeSwitch } from './components/ui';
+import { Avatar, BrandMark, IconClients, IconData, IconFinance, IconOverview, IconPlus, IconProjects, IconSearch, IconStop, IconWealth, ThemeMini, ThemeSwitch } from './components/ui';
 import { SCHEMA_OUTDATED } from './lib/remote';
 import { unpaidInvoices } from './lib/stats';
 import { resolved, useTheme } from './lib/theme';
@@ -19,16 +19,20 @@ import DataPage from './pages/DataPage';
 import FinancesPage from './pages/FinancesPage';
 import OverviewPage from './pages/OverviewPage';
 import ProjectsPage from './pages/ProjectsPage';
+import ClientsPage from './pages/ClientsPage';
+import WealthPage from './pages/WealthPage';
 import { ProjectModal, newProject } from './pages/OverviewPage';
 import { money } from './lib/format';
 
-export type Page = 'overview' | 'projects' | 'fin' | 'data';
+export type Page = 'overview' | 'projects' | 'clients' | 'fin' | 'wealth' | 'data';
 export type Account = { email: string; signOut: () => void };
 
 const PAGES: { key: Page; hash: string; label: string; Icon: () => React.JSX.Element }[] = [
   { key: 'overview', hash: '', label: 'Overview', Icon: IconOverview },
   { key: 'projects', hash: 'projects', label: 'Projects', Icon: IconProjects },
+  { key: 'clients', hash: 'clients', label: 'Clients', Icon: IconClients },
   { key: 'fin', hash: 'finances', label: 'Finances', Icon: IconFinance },
+  { key: 'wealth', hash: 'wealth', label: 'Wealth', Icon: IconWealth },
   { key: 'data', hash: 'data', label: 'Data & profile', Icon: IconData },
 ];
 
@@ -120,7 +124,7 @@ export default function App({ repo, account }: { repo: Repository; account?: Acc
       const k = e.key.toLowerCase();
       if (Date.now() - keys.current.g < 900) {
         keys.current.g = 0;
-        const to = ({ o: 'overview', p: 'projects', f: 'fin', d: 'data' } as Record<string, Page>)[k];
+        const to = ({ o: 'overview', p: 'projects', c: 'clients', f: 'fin', w: 'wealth', d: 'data' } as Record<string, Page>)[k];
         if (to) go(to);
         return;
       }
@@ -154,8 +158,8 @@ export default function App({ repo, account }: { repo: Repository; account?: Acc
         <div className="login-card section" style={{ gap: '0.75rem' }}>
           <h1 style={{ fontSize: '1.25rem' }}>One database update to run</h1>
           <p className="sub" style={{ margin: 0, lineHeight: 1.6 }}>
-            This version of Cockpit adds time tracking, invoices and budgets, and your database needs the matching tables. In Supabase, open
-            <b> SQL Editor → New query</b>, paste the file <code>supabase/migrations/20261002120000_features.sql</code> from your repository, click
+            This version of Cockpit adds new features, and your database needs the matching tables. In Supabase, open
+            <b> SQL Editor → New query</b>, paste the newest file(s) of <code>supabase/migrations/</code> from your repository that you haven't run yet, click
             <b> Run</b>, then try again. Your data is safe and unchanged.
           </p>
           <div className="row" style={{ gap: '0.5rem' }}>
@@ -201,7 +205,7 @@ export default function App({ repo, account }: { repo: Repository; account?: Acc
       : []),
     { id: 'search-tasks', group: 'Actions', label: 'Search tasks on the board', hint: '/', icon: <IconSearch size={14} />, keywords: 'filter find', run: searchTasks },
     { id: 'theme', group: 'Actions', label: dark ? 'Switch to light theme' : 'Switch to dark theme', icon: <span className="palette-theme" />, keywords: 'theme dark light mode black white', run: () => setTheme(dark ? 'light' : 'dark') },
-    ...PAGES.map(({ key, label, Icon }) => ({ id: 'go-' + key, group: 'Go to', label, hint: 'G ' + { overview: 'O', projects: 'P', fin: 'F', data: 'D' }[key], icon: <Icon />, run: () => go(key) })),
+    ...PAGES.map(({ key, label, Icon }) => ({ id: 'go-' + key, group: 'Go to', label, hint: 'G ' + { overview: 'O', projects: 'P', clients: 'C', fin: 'F', wealth: 'W', data: 'D' }[key], icon: <Icon />, run: () => go(key) })),
     ...data.projects
       .filter((p) => p.status !== 'Done')
       .slice(0, 5)
@@ -321,7 +325,9 @@ export default function App({ repo, account }: { repo: Repository; account?: Acc
         {page === 'projects' && (
           <ProjectsPage data={data} update={update} projectId={route.projectId} openProject={openProject} back={() => setPage('projects')} />
         )}
-        {page === 'fin' && <FinancesPage data={data} update={update} openProject={openProject} />}
+        {page === 'fin' && <FinancesPage data={data} update={update} openProject={openProject} goToData={() => setPage('data')} />}
+        {page === 'clients' && <ClientsPage data={data} update={update} openProject={openProject} />}
+        {page === 'wealth' && <WealthPage data={data} update={update} />}
         {page === 'data' && <DataPage data={data} update={update} account={session} />}
         </div>
       </main>

@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { AppData, Client, Entry, Investment, Note, Project, Recurring, Task, TimeEntry } from '../types';
+import type { AppData, Asset, AssetPrice, Client, Entry, Investment, Note, Project, Property, PropertyEntry, Recurring, Task, TimeEntry, Trade } from '../types';
 import { normalize, type Repository } from './store';
 
 /*
@@ -20,12 +20,11 @@ const UNKNOWN = Symbol('unknown'); // the request carrying this row failed: stat
 
 type Row = Record<string, unknown>;
 type Known = Row | typeof UNKNOWN;
-type ListTable = 'clients' | 'projects' | 'recurring' | 'entries' | 'tasks' | 'notes' | 'investments' | 'time_entries';
-type Rows = { profile: Row; clients: Row[]; projects: Row[]; recurring: Row[]; entries: Row[]; tasks: Row[]; notes: Row[]; investments: Row[]; time_entries: Row[] };
-const emptyTables = (): Record<ListTable, Map<string, Known>> => ({
-  clients: new Map(), projects: new Map(), recurring: new Map(), entries: new Map(), tasks: new Map(), notes: new Map(), investments: new Map(), time_entries: new Map(),
-});
-type Stale = { projects: string[]; clients: string[] };
+type ListTable = 'clients' | 'projects' | 'recurring' | 'entries' | 'tasks' | 'notes' | 'investments' | 'time_entries' | 'assets' | 'trades' | 'asset_prices' | 'properties' | 'property_entries';
+const LIST_TABLES: ListTable[] = ['clients', 'projects', 'recurring', 'entries', 'tasks', 'notes', 'investments', 'time_entries', 'assets', 'trades', 'asset_prices', 'properties', 'property_entries'];
+type Rows = { profile: Row } & Record<ListTable, Row[]>;
+const emptyTables = () => Object.fromEntries(LIST_TABLES.map((t) => [t, new Map<string, Known>()])) as Record<ListTable, Map<string, Known>>;
+type Stale = { projects: string[]; clients: string[]; assets?: string[]; properties?: string[] };
 type Base = { profile: Known | null; tables: Record<ListTable, Map<string, Known>> };
 
 const orNull = (s: string) => (s ? s : null);
@@ -64,14 +63,16 @@ export function toRows(d: AppData, userId: string): Rows {
   const pid = (id: string) => (ids.has(id) ? id : null);
   const cids = new Set(d.clients.map((c) => c.id));
   const cid = (id: string) => (cids.has(id) ? id : null);
+  const aids = new Set(d.assets.map((a) => a.id));
+  const hids = new Set(d.properties.map((x) => x.id));
   return {
     profile: {
       user_id: userId, name: d.profile.name, email: d.profile.email, company: d.profile.company,
       currency: d.profile.currency, target_pct: d.profile.targetPct, alert_pct: d.profile.alertPct,
       avatar: d.profile.avatar, invest_isin: d.profile.investIsin, invest_mic: d.profile.investMic, invest_name: d.profile.investName,
-      revenue_goal: d.profile.revenueGoal,
+      revenue_goal: d.profile.revenueGoal, tax: d.profile.tax, wealth: d.profile.wealth,
     },
-    clients: d.clients.map((c: Client) => ({ id: c.id, name: c.name, color: c.color })),
+    clients: d.clients.map((c: Client) => ({ id: c.id, name: c.name, color: c.color, notes: c.notes, contacts: c.contacts })),
     projects: d.projects.map((p: Project) => ({
       id: p.id, name: p.name, client_id: cid(p.clientId), start: orNull(p.start), deadline: orNull(p.deadline),
       status: p.status, position: p.position, brief_context: p.brief.context, brief_goal: p.brief.goal,
@@ -87,11 +88,26 @@ export function toRows(d: AppData, userId: string): Rows {
     })),
     recurring: d.recurring.map((r: Recurring) => ({
       id: r.id, label: r.label, type: r.type, category: r.category, amount: r.amount, frequency: r.frequency,
-      start: r.start, end: orNull(r.end), project_id: pid(r.projectId),
+      start: r.start, end: orNull(r.end), project_id: pid(r.projectId), client_id: cid(r.clientId),
     })),
     entries: d.entries.map((e: Entry) => ({
       id: e.id, date: e.date, label: e.label, type: e.type, category: e.category, amount: e.amount,
-      project_id: pid(e.projectId), paid: e.paid, due: orNull(e.due),
+      project_id: pid(e.projectId), paid: e.paid, due: orNull(e.due), client_id: cid(e.clientId),
+    })),
+    assets: d.assets.map((a: Asset) => ({
+      id: a.id, account: a.account, name: a.name, symbol: a.symbol, isin: a.isin, kind: a.kind, currency: a.currency,
+      price: a.price, price_at: orNull(a.priceAt), position: a.position,
+    })),
+    trades: d.trades.filter((t) => aids.has(t.assetId)).map((t: Trade) => ({
+      id: t.id, asset_id: t.assetId, date: t.date, side: t.side, quantity: t.quantity, price: t.price, fees: t.fees,
+    })),
+    asset_prices: d.assetPrices.filter((x) => aids.has(x.assetId)).map((x: AssetPrice) => ({ id: x.id, asset_id: x.assetId, date: x.date, price: x.price })),
+    properties: d.properties.map((x: Property) => ({
+      id: x.id, name: x.name, city: x.city, currency: x.currency, purchase_date: orNull(x.purchaseDate), purchase_price: x.purchasePrice,
+      value: x.value, debt: x.debt, rent: x.rent, charges: x.charges, loan: x.loan, notes: x.notes, position: x.position,
+    })),
+    property_entries: d.propertyEntries.filter((x) => hids.has(x.propertyId)).map((x: PropertyEntry) => ({
+      id: x.id, property_id: x.propertyId, date: x.date, kind: x.kind, amount: x.amount, label: x.label,
     })),
     time_entries: d.timeEntries.map((x: TimeEntry) => ({
       id: x.id, project_id: pid(x.projectId), task_id: orNull(x.taskId), date: x.date, minutes: x.minutes, note: x.note,
@@ -105,7 +121,7 @@ export function toRows(d: AppData, userId: string): Rows {
   };
 }
 
-export function fromRows(r: { profile: Row | null; clients: Row[]; projects: Row[]; tasks: Row[]; entries: Row[]; recurring: Row[]; notes: Row[]; investments: Row[]; time_entries: Row[] }): Partial<AppData> {
+export function fromRows(r: { profile: Row | null } & Record<ListTable, Row[]>): Partial<AppData> {
   const p = r.profile;
   return {
     profile: p
@@ -114,9 +130,14 @@ export function fromRows(r: { profile: Row | null; clients: Row[]; projects: Row
           targetPct: Number(p.target_pct ?? 30), alertPct: Number(p.alert_pct ?? 12), avatar: str(p.avatar),
           investIsin: str(p.invest_isin), investMic: str(p.invest_mic), investName: str(p.invest_name),
           revenueGoal: Number(p.revenue_goal ?? 0),
+          tax: (p.tax ?? {}) as AppData['profile']['tax'],
+          wealth: (p.wealth ?? {}) as AppData['profile']['wealth'],
         }
       : undefined,
-    clients: r.clients.map((x) => ({ id: str(x.id), name: str(x.name), color: str(x.color) })),
+    clients: r.clients.map((x) => ({
+      id: str(x.id), name: str(x.name), color: str(x.color), notes: str(x.notes),
+      contacts: Array.isArray(x.contacts) ? (x.contacts as Client['contacts']) : [],
+    })),
     projects: r.projects.map((x) => ({
       id: str(x.id), name: str(x.name), clientId: str(x.client_id), start: str(x.start), deadline: str(x.deadline),
       status: str(x.status) as Project['status'], position: Number(x.position),
@@ -140,7 +161,7 @@ export function fromRows(r: { profile: Row | null; clients: Row[]; projects: Row
     entries: r.entries.map((x) => ({
       id: str(x.id), date: str(x.date), label: str(x.label), type: str(x.type) as Entry['type'],
       category: str(x.category), amount: Number(x.amount), projectId: str(x.project_id),
-      paid: x.paid !== false, due: str(x.due),
+      paid: x.paid !== false, due: str(x.due), clientId: str(x.client_id),
     })),
     timeEntries: r.time_entries.map((x) => ({
       id: str(x.id), projectId: str(x.project_id), taskId: str(x.task_id), date: str(x.date), minutes: Number(x.minutes ?? 0),
@@ -149,7 +170,26 @@ export function fromRows(r: { profile: Row | null; clients: Row[]; projects: Row
     recurring: r.recurring.map((x) => ({
       id: str(x.id), label: str(x.label), type: str(x.type) as Recurring['type'], category: str(x.category),
       amount: Number(x.amount), frequency: str(x.frequency) as Recurring['frequency'], start: str(x.start),
-      end: str(x.end), projectId: str(x.project_id),
+      end: str(x.end), projectId: str(x.project_id), clientId: str(x.client_id),
+    })),
+    assets: r.assets.map((x) => ({
+      id: str(x.id), account: str(x.account) as Asset['account'], name: str(x.name), symbol: str(x.symbol), isin: str(x.isin),
+      kind: str(x.kind) as Asset['kind'], currency: str(x.currency), price: Number(x.price ?? 0),
+      priceAt: x.price_at ? new Date(str(x.price_at)).toISOString() : '', position: Number(x.position ?? 0),
+    })),
+    trades: r.trades.map((x) => ({
+      id: str(x.id), assetId: str(x.asset_id), date: str(x.date), side: str(x.side) as Trade['side'],
+      quantity: Number(x.quantity ?? 0), price: Number(x.price ?? 0), fees: Number(x.fees ?? 0),
+    })),
+    assetPrices: r.asset_prices.map((x) => ({ id: str(x.id), assetId: str(x.asset_id), date: str(x.date), price: Number(x.price) })),
+    properties: r.properties.map((x) => ({
+      id: str(x.id), name: str(x.name), city: str(x.city), currency: str(x.currency), purchaseDate: str(x.purchase_date),
+      purchasePrice: Number(x.purchase_price ?? 0), value: Number(x.value ?? 0), debt: Number(x.debt ?? 0), rent: Number(x.rent ?? 0),
+      charges: Number(x.charges ?? 0), loan: Number(x.loan ?? 0), notes: str(x.notes), position: Number(x.position ?? 0),
+    })),
+    propertyEntries: r.property_entries.map((x) => ({
+      id: str(x.id), propertyId: str(x.property_id), date: str(x.date), kind: str(x.kind) as PropertyEntry['kind'],
+      amount: Number(x.amount ?? 0), label: str(x.label),
     })),
   };
 }
@@ -169,37 +209,29 @@ export function createSupabaseRepository(db: SupabaseClient, userId: string): Re
 
   /** Read everything. Pure: does not touch base. */
   async function read() {
-    const [profile, clients, projects, tasks, entries, recurring, notes, investments, time_entries] = await Promise.all([
+    const ORDER: Record<ListTable, string> = {
+      clients: 'name', projects: 'position', tasks: 'position', entries: 'date', recurring: 'created_at', notes: 'created_at',
+      investments: 'date', time_entries: 'date', assets: 'position', trades: 'date', asset_prices: 'date', properties: 'position',
+      property_entries: 'date',
+    };
+    const [profile, ...lists] = await Promise.all([
       db.from('profiles').select('*').eq('user_id', userId).maybeSingle(),
-      fetchAll(db, 'clients', 'name'),
-      fetchAll(db, 'projects', 'position'),
-      fetchAll(db, 'tasks', 'position'),
-      fetchAll(db, 'entries', 'date'),
-      fetchAll(db, 'recurring', 'created_at'),
-      fetchAll(db, 'notes', 'created_at'),
-      fetchAll(db, 'investments', 'date'),
-      fetchAll(db, 'time_entries', 'date').catch((e: DbError) => {
-        // Table missing: the database was set up before this version and needs its update.
-        throw e?.code === 'PGRST205' || e?.code === '42P01' ? new Error(SCHEMA_OUTDATED) : e;
-      }),
+      ...LIST_TABLES.map((t) =>
+        fetchAll(db, t, ORDER[t]).catch((e: DbError) => {
+          // Table missing: the database was set up before this version and needs its update.
+          throw e?.code === 'PGRST205' || e?.code === '42P01' ? new Error(SCHEMA_OUTDATED) : e;
+        }),
+      ),
     ]);
     if (profile.error) throw profile.error;
-    const empty = !profile.data && !clients.length && !projects.length && !tasks.length && !entries.length && !recurring.length && !notes.length && !investments.length && !time_entries.length;
+    const raw = Object.fromEntries(LIST_TABLES.map((t, i) => [t, lists[i]])) as Record<ListTable, Row[]>;
+    const empty = !profile.data && LIST_TABLES.every((t) => !raw[t].length);
     // Base comes from exactly what the UI will hold: a row normalize() drops is left alone in the DB.
-    const data = normalize(fromRows({ profile: profile.data, clients, projects, tasks, entries, recurring, notes, investments, time_entries }));
+    const data = normalize(fromRows({ profile: profile.data, ...raw }));
     const rows = toRows(data, userId);
     const nextBase: Base = {
       profile: profile.data ? rows.profile : null,
-      tables: {
-        clients: new Map(rows.clients.map((r) => [r.id as string, r])),
-        projects: new Map(rows.projects.map((r) => [r.id as string, r])),
-        recurring: new Map(rows.recurring.map((r) => [r.id as string, r])),
-        entries: new Map(rows.entries.map((r) => [r.id as string, r])),
-        tasks: new Map(rows.tasks.map((r) => [r.id as string, r])),
-        notes: new Map(rows.notes.map((r) => [r.id as string, r])),
-        investments: new Map(rows.investments.map((r) => [r.id as string, r])),
-        time_entries: new Map(rows.time_entries.map((r) => [r.id as string, r])),
-      },
+      tables: Object.fromEntries(LIST_TABLES.map((t) => [t, new Map(rows[t].map((r) => [r.id as string, r as Known]))])) as Record<ListTable, Map<string, Known>>,
     };
     return { data: empty ? null : data, base: nextBase };
   }
@@ -296,18 +328,18 @@ export function createSupabaseRepository(db: SupabaseClient, userId: string): Re
     }
 
     const ok =
-      (await run([...profileJobs, ...tableJobs('clients')])) &&
+      (await run([...profileJobs, ...tableJobs('clients'), ...tableJobs('assets'), ...tableJobs('properties')])) &&
       (await run(tableJobs('projects'))) &&
-      (await run([...tableJobs('recurring'), ...tableJobs('entries'), ...tableJobs('tasks'), ...tableJobs('notes'), ...tableJobs('investments'), ...tableJobs('time_entries')])) &&
-      (await run([...deleteJobs('tasks'), ...deleteJobs('entries'), ...deleteJobs('recurring'), ...deleteJobs('notes'), ...deleteJobs('investments'), ...deleteJobs('time_entries')])) &&
+      (await run([...tableJobs('recurring'), ...tableJobs('entries'), ...tableJobs('tasks'), ...tableJobs('notes'), ...tableJobs('investments'), ...tableJobs('time_entries'), ...tableJobs('trades'), ...tableJobs('asset_prices'), ...tableJobs('property_entries')])) &&
+      (await run([...deleteJobs('tasks'), ...deleteJobs('entries'), ...deleteJobs('recurring'), ...deleteJobs('notes'), ...deleteJobs('investments'), ...deleteJobs('time_entries'), ...deleteJobs('trades'), ...deleteJobs('asset_prices'), ...deleteJobs('property_entries')])) &&
       (await run(deleteJobs('projects'))) &&
-      (await run(deleteJobs('clients')));
+      (await run([...deleteJobs('clients'), ...deleteJobs('assets'), ...deleteJobs('properties')]));
     if (ok) return;
 
     const err = failure as DbError | null;
     if (err && err.code === '23503') {
       // A project or client was deleted on another device: tell the UI which ones are gone.
-      const gone = async (t: 'projects' | 'clients', ids: string[]) => {
+      const gone = async (t: 'projects' | 'clients' | 'assets' | 'properties', ids: string[]) => {
         const { data: live, error } = await db.from(t).select('id');
         if (error || !live) return [];
         const alive = new Set(live.map((r: Row) => r.id as string));
@@ -319,8 +351,12 @@ export function createSupabaseRepository(db: SupabaseClient, userId: string): Re
       const stale: Stale = {
         projects: await gone('projects', data.projects.map((p) => p.id)),
         clients: await gone('clients', data.clients.map((c) => c.id)),
+        assets: await gone('assets', data.assets.map((a) => a.id)),
+        properties: await gone('properties', data.properties.map((x) => x.id)),
       };
-      if (stale.projects.length || stale.clients.length) throw new RejectedError('Deleted on another device', stale);
+      if (stale.projects.length || stale.clients.length || stale.assets?.length || stale.properties?.length) {
+        throw new RejectedError('Deleted on another device', stale);
+      }
     }
     if (err && err.code === 'PGRST204') throw new RejectedError('The database needs an update (see "Updating" in the README)');
     if (err && isPermanent(err)) throw new RejectedError(err.message ?? 'Change rejected');
