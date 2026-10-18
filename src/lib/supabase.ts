@@ -26,7 +26,7 @@ function connect(): SupabaseClient | null {
         // Implicit flow so a magic link requested on the laptop can be opened on the phone.
         flowType: 'implicit',
       },
-    });
+    }) as unknown as SupabaseClient;
   } catch (e) {
     configError = `The Supabase settings were refused: ${e instanceof Error ? e.message : String(e)}`;
     return null;
