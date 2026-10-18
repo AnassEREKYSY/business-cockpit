@@ -18,6 +18,7 @@ function connect(): SupabaseClient | null {
   }
   try {
     return createClient(url, key, {
+      db: { schema: 'cockpit' },
       auth: {
         persistSession: true,
         autoRefreshToken: true,
