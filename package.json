@@ -11,9 +11,13 @@
     "test": "tsx .e2e/place.test.ts"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^4.0.108",
+    "@ai-sdk/react": "^4.0.166",
     "@supabase/supabase-js": "^2.117.2",
+    "ai": "^7.0.162",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

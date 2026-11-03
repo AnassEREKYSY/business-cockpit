@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { EntryModal, newEntry } from './components/MoneyForms';
 import { Palette, type Command } from './components/Palette';
 import { TaskModal, newTask } from './components/TaskModal';
@@ -26,6 +26,9 @@ import SubscriptionsPage from './pages/SubscriptionsPage';
 import TaxesPage from './pages/TaxesPage';
 import { ProjectModal, newProject } from './pages/OverviewPage';
 import { money } from './lib/format';
+
+// The assistant (and the AI SDK) loads in its own chunk, after the app is on screen.
+const Assistant = lazy(() => import('./assistant/Assistant').then((m) => ({ default: m.Assistant })));
 
 export type Page = 'overview' | 'projects' | 'clients' | 'fin' | 'taxes' | 'subs' | 'wealth' | 'data';
 export type Account = { email: string; signOut: () => void };
@@ -339,6 +342,7 @@ export default function App({ repo, account }: { repo: Repository; account?: Acc
 
       <nav className="tabbar">{nav.filter((n) => n.key !== 'data')}</nav>
       {palette && <Palette commands={commands} onClose={() => setPalette(false)} />}
+      <Suspense fallback={null}><Assistant data={data} update={update} /></Suspense>
       {modal?.task && <TaskModal task={modal.task} data={data} update={update} onClose={() => setModal(null)} />}
       {modal?.project && <ProjectModal project={modal.project} data={data} update={update} onClose={() => setModal(null)} onCreated={openProject} />}
       {modal?.entry && <EntryModal entry={modal.entry} data={data} update={update} onClose={() => setModal(null)} />}

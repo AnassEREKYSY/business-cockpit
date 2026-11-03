@@ -202,6 +202,29 @@ Renaming a label is safe. Adding or removing a project status, task column or jo
 
 ---
 
+## Assistant (optional)
+
+A chat panel (the **Assistant** button, bottom right) that answers questions about your data and does tasks for you:
+
+- **Ask**: "How much did I earn this month?", "Which client brings me the most?", "What's still unpaid?",
+  "When did I last work on the booking app?", "How many hours this week?", "What do my subscriptions cost per year?"
+- **Do**: add revenue or a cost, mark an invoice as paid, add or cancel a subscription, add a task, move a task to Done,
+  log time, add a note to a project journal. Each action shows a card with the details: **nothing is saved until you click Confirm**,
+  and the toast that follows has an Undo button. The assistant cannot delete anything.
+
+To turn it on:
+
+1. Create an API key on [platform.openai.com](https://platform.openai.com) (API billing is separate from a ChatGPT subscription;
+   add a few dollars of credit and set a monthly limit).
+2. In the database, run `supabase/migrations/20261103120000_assistant_usage.sql` (daily message limits).
+3. In Vercel, add the environment variable `OPENAI_API_KEY`, then redeploy. Optional: `OPENAI_MODEL` (default `gpt-4o-mini`).
+
+How it works: `api/assistant.ts` checks your Supabase session, counts the message (300 per day per user), and streams the
+conversation to OpenAI with the list of tools (`src/assistant/schema.ts`). The tools run **in your browser** on the data
+Cockpit has already loaded (`src/assistant/run.ts`), with the same calculations as the rest of the app; actions go through the
+same save as any edit. Only the question and the results the tools return are sent to OpenAI, never your whole database.
+For local development, put `OPENAI_API_KEY` in `.env.local` (without the `VITE_` prefix, so it never reaches the browser).
+
 ## For developers
 
 Requirements: Node.js 22.12 or later.

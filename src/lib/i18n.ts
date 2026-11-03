@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import frApp from '../i18n/fr-app';
+import frAssistant from '../i18n/fr-assistant';
 import frMoney from '../i18n/fr-money';
 import frOverview from '../i18n/fr-overview';
 import frProjects from '../i18n/fr-projects';
@@ -17,7 +18,7 @@ import frWealth from '../i18n/fr-wealth';
 export type Lang = 'en' | 'fr';
 
 const KEY = 'cockpit-lang';
-const FR: Record<string, string> = { ...frApp, ...frOverview, ...frProjects, ...frMoney, ...frWealth, ...frSubs, ...frTaxes };
+const FR: Record<string, string> = { ...frApp, ...frOverview, ...frProjects, ...frMoney, ...frWealth, ...frSubs, ...frTaxes, ...frAssistant };
 
 function read(): Lang {
   try {
