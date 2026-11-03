@@ -6,8 +6,12 @@ import { locale, t } from '../lib/i18n';
 import { projectStats, isOverdue, unpaidInvoices } from '../lib/stats';
 import { withCol } from '../lib/store';
 import { SUB_CATEGORIES, isActive as subActive, monthlyOf, nextPayment, paidSoFar } from '../lib/subscriptions';
+import { rateOn } from '../lib/tax';
+import { figures } from '../lib/taxItems';
+import { periodRows } from '../lib/urssaf';
+import { fxRates } from '../lib/wealth';
 import { entryMinutes, sumMinutes, weekStart } from '../lib/time';
-import type { AppData, Entry, Note, Subscription, Task, TimeEntry, Txn } from '../types';
+import type { AppData, Entry, Note, Subscription, Task, TaxPayment, TimeEntry, Txn } from '../types';
 import { actionTools, readTools, type ActionToolName, type ReadToolName } from './schema';
 
 /*
@@ -273,6 +277,58 @@ const readers: { [K in ReadToolName]: (d: AppData, input: Input<(typeof readTool
     return { count: list.length, activeCostPerMonth: perMonth, subscriptions: list.map((s) => subRow(s, today)) };
   },
 
+  get_taxes: (d, { year }) => {
+    // Same figures as the Taxes page.
+    const today = isoDate();
+    const y = String(year ?? Number(today.slice(0, 4)));
+    const tax = d.profile.tax;
+    const cur = d.profile.currency || 'EUR';
+    const rows = periodRows(d, today).filter((r) => r.status !== 'upcoming');
+    const late = rows.filter((r) => r.status === 'late');
+    const next = late[0] ?? rows.find((r) => r.status === 'due') ?? rows.find((r) => r.status === 'open');
+    const paidThisYear = d.taxPayments.filter((p) => (p.paidOn || p.periodEnd).startsWith(y));
+    const yearRows = rows.filter((r) => r.end.startsWith(y) || r.start.startsWith(y));
+    const now = rateOn(tax, today);
+    const fx = fxRates(d, {});
+    const items = d.taxItems
+      .filter((x) => x.scope === 'business' || x.year === Number(y))
+      .map((x) => {
+        const f = figures(d, x, cur, fx);
+        return {
+          name: x.name, scope: x.scope, incomeYear: x.year, dueDate: x.dueDate || undefined,
+          taxableAmount: r2(f.base), ratePct: x.rate, amountDue: r2(f.due), fromTaxNotice: f.fromNotice || undefined,
+          paid: r2(x.paid), paidOn: x.paidOn || undefined, leftToPay: r2(f.left),
+        };
+      });
+    return {
+      currency: cur,
+      year: y,
+      urssaf: {
+        setup: tax.start ? undefined : 'Business start date not set: no URSSAF calendar yet.',
+        declares: tax.period === 'month' ? 'every month' : 'every quarter',
+        businessStart: tax.start || undefined,
+        acreUntil: tax.acreUntil || undefined,
+        rateTodayPct: { total: r2(now.total), social: now.social, cfp: now.cfp, incomeTax: now.vl, acre: now.acre },
+        nextPayment: next ? {
+          status: next.status === 'late' ? 'overdue' : next.status === 'open' ? 'period still running, amount will grow' : 'due',
+          deadline: next.deadline, period: { start: next.start, end: next.end },
+          estimatedAmount: r2(next.estimate.total), revenueCashedIn: r2(next.estimate.gross),
+        } : undefined,
+        paidThisYear: { total: r2(paidThisYear.reduce((a, p) => a + p.amount, 0)), payments: paidThisYear.length },
+        stillToPay: r2(rows.filter((r) => r.status === 'late' || r.status === 'due').reduce((a, r) => a + r.estimate.total, 0)),
+        totalThisYear: r2(yearRows.reduce((a, r) => a + (r.payment ? r.payment.amount : r.estimate.total), 0)),
+        periods: [...rows].reverse().slice(0, 12).map((r) => ({
+          start: r.start, end: r.end, deadline: r.deadline,
+          status: r.status === 'late' ? 'overdue' : r.status === 'open' ? 'running' : r.status,
+          revenueCashedIn: r2(r.estimate.gross), estimate: r2(r.estimate.total),
+          paid: r.payment ? r2(r.payment.amount) : undefined, paidOn: r.payment?.paidOn || undefined,
+        })),
+      },
+      otherTaxes: items,
+      note: 'Estimates from the rates set in Cockpit; not tax advice.',
+    };
+  },
+
   calculate: (_d, { expression }) => ({ expression, result: evaluate(expression) }),
 };
 
@@ -441,6 +497,29 @@ const preparers: { [K in ActionToolName]: (d: AppData, input: Input<(typeof acti
       lines: [['Subscription', s.name], ['Cost', `${fmtAmount(s.amount, s.currency)} / ${t(s.cycle)}`], ['Cancelled from', day]],
       apply: (x) => ({ ...x, subscriptions: x.subscriptions.map((y) => (y.id === s.id ? { ...y, end: day } : y)) }),
       result: { saved: true, name: s.name },
+    };
+  },
+
+  record_urssaf_payment: (d, { periodEnd, amount, paidOn }) => {
+    const row = periodRows(d, isoDate()).find((r) => r.end === periodEnd);
+    if (!row) throw new ToolError('No URSSAF period ends on this day. Use get_taxes to list the periods.');
+    if (row.payment) throw new ToolError(`This period is already recorded as paid (${r2(row.payment.amount)} on ${row.payment.paidOn || row.end}).`);
+    if (row.start > isoDate()) throw new ToolError('This period has not started yet.');
+    const p: TaxPayment = {
+      id: uid(), periodStart: row.start, periodEnd: row.end, revenue: r2(row.estimate.gross),
+      amount: r2(amount ?? row.estimate.total), paidOn: paidOn ?? isoDate(), notes: '',
+    };
+    const cur = d.profile.currency || 'EUR';
+    return {
+      title: 'Record an URSSAF payment',
+      lines: [
+        ['Period', `${row.start} → ${row.end}`],
+        ['Revenue declared', fmtAmount(p.revenue, cur)],
+        ['Amount paid', fmtAmount(p.amount, cur)],
+        ['Paid on', p.paidOn],
+      ],
+      apply: (x) => ({ ...x, taxPayments: [...x.taxPayments, p].sort((a, b) => a.periodEnd.localeCompare(b.periodEnd)) }),
+      result: { saved: true, period: { start: row.start, end: row.end }, amount: p.amount },
     };
   },
 

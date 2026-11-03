@@ -24,6 +24,7 @@ const SUGGESTIONS = [
   'How much did I earn this month?',
   'Which client brings me the most money?',
   'Which invoices are still unpaid?',
+  'When is my next URSSAF payment and how much?',
   'What did I work on last week?',
   'Add my Netflix subscription, 13.49 EUR a month',
 ];
@@ -38,6 +39,7 @@ const READ_LABELS: Record<string, string> = {
   list_tasks: 'Tasks',
   get_time: 'Time',
   list_subscriptions: 'Subscriptions',
+  get_taxes: 'Taxes',
   calculate: 'Calculated',
 };
 

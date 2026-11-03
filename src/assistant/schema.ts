@@ -69,6 +69,13 @@ export const readTools = {
     description: 'Subscriptions with their ids, price, cycle, cost per month and per year, next payment and total paid so far.',
     inputSchema: z.object({ includeCancelled: z.boolean().default(false), scope: z.enum(['any', 'business', 'personal']).default('any') }),
   },
+  get_taxes: {
+    description:
+      'Taxes page: URSSAF micro-entreprise settings and current rate, next URSSAF payment (deadline and estimated amount), ' +
+      'paid this year, still to pay, total for the year, every declaration period (revenue cashed in, estimate, paid or not), ' +
+      'and the other business and personal taxes (CFE, income tax, investments, rents) with amount due and left to pay.',
+    inputSchema: z.object({ year: z.number().int().min(2000).max(2100).optional().describe('Default: this year') }),
+  },
   calculate: {
     description: 'Exact arithmetic. Use it for any calculation instead of doing it yourself. Supports + - * / % ( ) and decimals.',
     inputSchema: z.object({ expression: z.string().min(1).max(200).describe('For example: (2400 - 380) * 0.78') }),
@@ -111,6 +118,16 @@ export const actionTools = {
   cancel_subscription: {
     description: 'Mark a subscription as cancelled from a given day. Find its id with list_subscriptions first.',
     inputSchema: z.object({ subscriptionId: z.string().min(1), end: day.optional().describe('Default: today') }),
+  },
+  record_urssaf_payment: {
+    description:
+      'Record that an URSSAF period was declared and paid. Find the period with get_taxes first. ' +
+      'Amount defaults to the estimate for that period; use the real amount when the user gives it.',
+    inputSchema: z.object({
+      periodEnd: day.describe('Last day of the period, as listed by get_taxes'),
+      amount: z.number().positive().optional(),
+      paidOn: day.optional().describe('Default: today'),
+    }),
   },
   add_task: {
     description: 'Add a task to the board.',
