@@ -41,6 +41,13 @@ const fr: Record<string, string> = {
   Time: 'Temps',
   Subscriptions: 'Abonnements',
   Calculated: 'Calcul',
+  Taxes: 'Impôts',
+  'When is my next URSSAF payment and how much?': 'Quand est mon prochain paiement URSSAF, et combien ?',
+  'Record an URSSAF payment': 'Enregistrer un paiement URSSAF',
+  Period: 'Période',
+  'Revenue declared': 'CA déclaré',
+  'Amount paid': 'Montant payé',
+  'Paid on': 'Payé le',
 
   // Confirmation cards
   'Add revenue': 'Ajouter un revenu',
